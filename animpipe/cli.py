@@ -152,6 +152,27 @@ def cmd_launch(args) -> int:
                   dry_run=args.dry_run, no_sync=args.no_sync)
 
 
+def cmd_publish(args) -> int:
+    cfg = ProjectConfig.load(args.config)
+    if not os.path.isfile(args.local):
+        print(f"error: local file not found: {args.local}", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print(f"(dry-run) would publish {args.local} for task {args.task} "
+              f"and set status '{args.status}'")
+        return 0
+    from . import tasks as T
+    creds = SFTPCredentials.from_env(args.env)
+    with SFTPClient(creds) as client:
+        rel = T.publish_task(client, cfg.remote_root, creds.user,
+                             args.local, args.task, args.status)
+    if not rel:
+        print(f"error: task not found: {args.task}", file=sys.stderr)
+        return 1
+    print(f"published -> {cfg.remote_root}/{rel}\ntask {args.task} -> {args.status}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Common flags live on a parent parser so they work either before OR after
     # the subcommand (e.g. both `animpipe --dry-run init-project` and
@@ -213,6 +234,14 @@ def build_parser() -> argparse.ArgumentParser:
     lc.add_argument("blender_args", nargs="*",
                     help="extra args passed through to Blender")
     lc.set_defaults(func=cmd_launch)
+
+    pb = sub.add_parser("publish", parents=[common],
+                        help="publish a file into a task's publish/ folder")
+    pb.add_argument("--local", required=True, help="local file to publish")
+    pb.add_argument("--task", required=True, help="task id")
+    pb.add_argument("--status", default="review",
+                    help="task status to set after publish (default: review)")
+    pb.set_defaults(func=cmd_publish)
 
     return p
 

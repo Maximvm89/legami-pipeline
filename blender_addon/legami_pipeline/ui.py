@@ -1,58 +1,43 @@
-"""N-panel UI for the Legami pipeline addon (View3D > Sidebar > Legami)."""
-
-from __future__ import annotations
+"""Legami menu in Blender's top menu bar (next to Help)."""
 
 import os
 
 import bpy
 
-from . import settings_io
 from . import operators as _ops
 
 
-class LEGAMI_PT_panel(bpy.types.Panel):
-    bl_label = "Legami Pipeline"
-    bl_idname = "LEGAMI_PT_panel"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Legami"
+class LEGAMI_MT_menu(bpy.types.Menu):
+    bl_label = "Legami"
+    bl_idname = "LEGAMI_MT_menu"
 
     def draw(self, context):
         layout = self.layout
-        prefs = context.preferences.addons[__package__].preferences
-        root = settings_io.find_project_root(prefs.local_root)
-
         task = _ops.active_task()
         if task:
-            tbox = layout.box()
-            tbox.label(text="Active Task", icon="OUTLINER_OB_ARMATURE")
-            tbox.label(text=f"{task['entity']}")
-            tbox.label(text=f"step: {task['step']}  ({task['type']})")
-            tbox.operator("legami.save_to_task", icon="FILE_TICK")
-
-        box = layout.box()
-        box.label(text="Project Setup", icon="TOOL_SETTINGS")
-        if root and os.path.isfile(settings_io.settings_path(root)):
-            box.label(text=f"Root: {os.path.basename(root)}", icon="CHECKMARK")
-        elif root:
-            box.label(text="settings file missing — pull from FTP", icon="ERROR")
+            layout.label(text=f"Task: {task['entity']}  ·  {task['step']}",
+                         icon="OUTLINER_OB_ARMATURE")
+            layout.operator("legami.save_to_task", icon="FILE_TICK")
+            layout.operator("legami.publish", text="Publish", icon="EXPORT")
+            layout.separator()
         else:
-            box.label(text="No project root — use launcher", icon="ERROR")
+            layout.label(text="No active task (open from Workspace app)",
+                         icon="INFO")
+            layout.separator()
 
-        col = box.column(align=True)
-        col.scale_y = 1.3
-        col.operator("legami.apply_project_settings", icon="CHECKMARK")
-        col.operator("legami.verify_ocio", icon="COLOR")
-
-        box = layout.box()
-        box.label(text="Sync", icon="FILE_REFRESH")
-        box.operator("legami.pull_settings", icon="IMPORT")
+        layout.operator("legami.apply_project_settings", icon="CHECKMARK")
+        layout.operator("legami.verify_ocio", icon="COLOR")
+        layout.separator()
+        layout.operator("legami.pull_settings", icon="IMPORT")
 
         ocio = os.environ.get("BLENDER_OCIO")
-        sub = layout.box()
-        sub.label(text="Status", icon="INFO")
-        sub.label(text=f"OCIO: {'set' if ocio else 'NOT set (bundled)'}",
-                  icon="DOT" if ocio else "ERROR")
+        layout.separator()
+        layout.label(text="OCIO: " + ("loaded" if ocio else "NOT set — use launcher"),
+                     icon="DOT" if ocio else "ERROR")
 
 
-CLASSES = (LEGAMI_PT_panel,)
+def draw_menu(self, context):
+    self.layout.menu("LEGAMI_MT_menu")
+
+
+CLASSES = (LEGAMI_MT_menu,)

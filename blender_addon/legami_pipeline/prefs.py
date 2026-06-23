@@ -1,7 +1,5 @@
 """Addon preferences — per-user SFTP login + local paths."""
 
-from __future__ import annotations
-
 import bpy
 
 
@@ -39,8 +37,5 @@ class LegamiPipelinePrefs(bpy.types.AddonPreferences):
         box.label(text="Project Paths", icon="FILE_FOLDER")
         box.prop(self, "remote_root")
         box.prop(self, "local_root")
-
-        box = layout.box()
-        box.label(text="Dependencies", icon="SCRIPT")
-        box.operator("legami.install_deps", icon="IMPORT")
-        box.label(text="Needed only for in-Blender FTP pulls.", icon="INFO")
+        box.label(text="Note: when opened via the Workspace app, these are set "
+                       "automatically — you don't need to fill them in.", icon="INFO")

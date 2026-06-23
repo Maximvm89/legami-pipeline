@@ -37,6 +37,9 @@ class FakeSrv:
     def remove(self, p):
         self.files.pop(p, None)
 
+    def upload(self, local, remote):
+        self.files[remote] = f"<blend:{local}>"
+
 
 def test_make_id_safe():
     assert tasks.make_id("shot", "SEQ010/SH0010", "animation") == \
@@ -86,6 +89,26 @@ def test_delete_task():
     assert len(tasks.load_tasks(s, "/r")) == 1
     tasks.delete_task(s, "/r", t["id"])
     assert tasks.load_tasks(s, "/r") == []
+
+
+def test_publish_task():
+    s = FakeSrv()
+    t = tasks.save_task(s, "/r", tasks.new_task("asset", "characters/panda", "model"))
+    rel = tasks.publish_task(s, "/r", "marco",
+                             "/tmp/panda_model_v001.blend", t["id"])
+    assert rel == "03_assets/characters/panda/model/publish/panda_model_v001.blend"
+    # file landed at the right remote path
+    assert "/r/" + rel in s.files
+    # status advanced to review
+    assert tasks.load_tasks(s, "/r")[0]["status"] == "review"
+    # attribution recorded
+    from animpipe import ledger
+    assert ledger.load_ledgers(s, "/r")[rel][0] == "marco"
+
+
+def test_publish_task_missing():
+    s = FakeSrv()
+    assert tasks.publish_task(s, "/r", "marco", "/tmp/x.blend", "nope") is None
 
 
 def test_task_path_helpers():

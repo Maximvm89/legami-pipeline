@@ -103,6 +103,13 @@ def launch(cfg: ProjectConfig, creds: SFTPCredentials, extra_args: list[str] | N
 
     # Pass the project root to the addon so it can find project_settings.json.
     env["LEGAMI_PROJECT_ROOT"] = local_root
+    # Let the addon shell back to this toolkit (for publish uploads).
+    env["LEGAMI_TOOLKIT_PY"] = sys.executable
+    env["LEGAMI_TOOLKIT_DIR"] = os.getcwd()
+    # Folder containing the legami_pipeline package, for auto-load on launch.
+    addon_dir = os.path.join(os.getcwd(), "blender_addon")
+    if os.path.isdir(addon_dir):
+        env["LEGAMI_ADDON_DIR"] = addon_dir
 
     blender = find_blender(cfg.blender_path)
     if not blender:
@@ -119,7 +126,12 @@ def launch(cfg: ProjectConfig, creds: SFTPCredentials, extra_args: list[str] | N
         print("(dry-run: not actually launching)")
         return 0
 
-    cmd = [blender] + (extra_args or [])
+    cmd = [blender]
+    # Auto-load the add-on for this session (no manual install needed).
+    bootstrap = os.path.join(os.path.dirname(__file__), "blender_bootstrap.py")
+    if "LEGAMI_ADDON_DIR" in env and os.path.isfile(bootstrap):
+        cmd += ["--python", bootstrap]
+    cmd += (extra_args or [])
     # Detach so closing the terminal doesn't kill Blender.
     subprocess.Popen(cmd, env=env)
     return 0

@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "blender_addon"))
 def _install_fake_bpy():
     bpy = types.ModuleType("bpy")
     bpy.types = types.SimpleNamespace(Operator=object, Panel=object,
-                                      AddonPreferences=object)
+                                      AddonPreferences=object, Menu=object)
     def _prop(*a, **k):
         return None
     bpy.props = types.SimpleNamespace(

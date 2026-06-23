@@ -15,7 +15,7 @@ bl_info = {
     "author": "Legami Pipeline",
     "version": (0, 1, 0),
     "blender": (4, 2, 0),
-    "location": "View3D > Sidebar > Legami",
+    "location": "Top bar > Legami menu",
     "description": "Project init: pull and apply standard project settings + OCIO.",
     "category": "Pipeline",
 }
@@ -32,9 +32,12 @@ _ALL_CLASSES = (_prefs.LegamiPipelinePrefs, *_ops.CLASSES, *_ui.CLASSES)
 def register():
     for cls in _ALL_CLASSES:
         bpy.utils.register_class(cls)
+    # Add a "Legami" menu to the top menu bar (next to Help).
+    bpy.types.TOPBAR_MT_editor_menus.append(_ui.draw_menu)
 
 
 def unregister():
+    bpy.types.TOPBAR_MT_editor_menus.remove(_ui.draw_menu)
     for cls in reversed(_ALL_CLASSES):
         bpy.utils.unregister_class(cls)
 

@@ -63,8 +63,22 @@ Flow: **artist double-clicks the launcher → it syncs config from FTP & sets OC
   "Install Dependencies" in the addon preferences once (needs internet). The
   launcher path doesn't need this (it uses animpipe's own environment).
 
+## Publishing (from a task)
+
+Open a task from the Workspace app (right-click → Open in Blender). The Legami
+panel shows an **Active Task** box with two actions:
+
+- **Save into task work folder** — saves the current `.blend` into the task's
+  `work/` folder, auto-versioned (`panda_model_v001.blend`, `_v002`, …).
+- **Publish** — writes a versioned copy into the task's `publish/` folder,
+  uploads it to the FTP, and sets the task status to **Review**.
+
+Publishing uploads via the toolkit's own `animpipe publish` command (the launcher
+makes it reachable), so attribution and task status update through the same tested
+code path the rest of the pipeline uses. Tip: sync the project first so publish
+versions don't clash with versions other artists already pushed.
+
 ## Next tools (same pattern)
 
-- **Publish** (asset/shot) from Blender into the right `publish/` folder with
-  versioning, using the per-user login.
+- Publish steps beyond modelling (rig, surface, shot departments) — same flow.
 - A **Maya** version of this addon reading the same `project_settings.json`.

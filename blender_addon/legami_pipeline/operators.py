@@ -1,10 +1,7 @@
 """Blender operators for the Legami pipeline addon."""
 
-from __future__ import annotations
-
 import os
 import subprocess
-import sys
 
 import bpy
 
@@ -12,7 +9,32 @@ from . import settings_io
 
 
 def _prefs():
-    return bpy.context.preferences.addons[__package__].preferences
+    """Addon preferences if the addon was installed the normal way, else None
+    (when auto-loaded for a session, settings come from env vars instead)."""
+    try:
+        return bpy.context.preferences.addons[__package__].preferences
+    except (KeyError, AttributeError):
+        return None
+
+
+def _pref_local_root():
+    p = _prefs()
+    return getattr(p, "local_root", None) if p else None
+
+
+def _shell_toolkit(args, report):
+    """Run an animpipe CLI command via the toolkit the launcher exposed."""
+    py = os.environ.get("LEGAMI_TOOLKIT_PY")
+    td = os.environ.get("LEGAMI_TOOLKIT_DIR")
+    if not py or not td:
+        report({"ERROR"}, "Toolkit not available — launch from the Workspace app.")
+        return False
+    try:
+        subprocess.check_call([py, "-m", "animpipe"] + args, cwd=td)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        report({"ERROR"}, f"Command failed: {exc}")
+        return False
 
 
 def _apply_one(report, label, fn):
@@ -142,8 +164,7 @@ class LEGAMI_OT_apply_project_settings(bpy.types.Operator):
         description="Apply to every scene in this file, not just the active one")
 
     def execute(self, context):
-        prefs = _prefs()
-        root = settings_io.find_project_root(prefs.local_root)
+        root = settings_io.find_project_root(_pref_local_root())
         if not root:
             self.report({"ERROR"}, "No project root. Launch via the Legami launcher, "
                                    "or set Local Project Root in addon preferences.")
@@ -177,8 +198,7 @@ class LEGAMI_OT_verify_ocio(bpy.types.Operator):
     bl_description = "Check that Blender loaded the project OCIO config and the project's color names exist"
 
     def execute(self, context):
-        prefs = _prefs()
-        root = settings_io.find_project_root(prefs.local_root)
+        root = settings_io.find_project_root(_pref_local_root())
         env_ocio = os.environ.get("BLENDER_OCIO")
         expected = settings_io.ocio_path(root) if root else None
 
@@ -213,81 +233,19 @@ class LEGAMI_OT_verify_ocio(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class LEGAMI_OT_install_deps(bpy.types.Operator):
-    bl_idname = "legami.install_deps"
-    bl_label = "Install Dependencies (paramiko)"
-    bl_description = "Install paramiko into Blender's user modules for FTP operations (needs internet)"
-
-    def execute(self, context):
-        target = bpy.utils.user_resource("SCRIPTS", path="modules", create=True)
-        try:
-            subprocess.check_call([sys.executable, "-m", "ensurepip"])
-        except Exception:  # noqa: BLE001 — ensurepip may already be present
-            pass
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install",
-                                   "--upgrade", "paramiko", "--target", target])
-        except Exception as exc:  # noqa: BLE001
-            self.report({"ERROR"}, f"pip install failed: {exc}")
-            return {"CANCELLED"}
-        if target not in sys.path:
-            sys.path.append(target)
-        self.report({"INFO"}, "paramiko installed. FTP features are now available.")
-        return {"FINISHED"}
-
-
 class LEGAMI_OT_pull_settings(bpy.types.Operator):
     bl_idname = "legami.pull_settings"
     bl_label = "Pull Latest From FTP"
-    bl_description = "Download the latest project_settings.json and OCIO config from the FTP using your login"
+    bl_description = "Re-sync the project config (OCIO + project_settings.json) from the FTP"
 
     def execute(self, context):
-        prefs = _prefs()
-        try:
-            import paramiko  # noqa: F401
-        except ImportError:
-            self.report({"ERROR"},
-                        "paramiko not installed. Use 'Install Dependencies' first.")
-            return {"CANCELLED"}
-
-        if not (prefs.sftp_host and prefs.sftp_user):
-            self.report({"ERROR"}, "Set SFTP host and user in addon preferences.")
-            return {"CANCELLED"}
-
-        root = settings_io.find_project_root(prefs.local_root)
-        if not root:
-            self.report({"ERROR"}, "Set Local Project Root in addon preferences.")
-            return {"CANCELLED"}
-
-        import paramiko
-        try:
-            t = paramiko.Transport((prefs.sftp_host, int(prefs.sftp_port or 22)))
-            t.connect(username=prefs.sftp_user, password=prefs.sftp_password or None)
-            sftp = paramiko.SFTPClient.from_transport(t)
-            remote_pipeline = prefs.remote_root.rstrip("/") + "/02_pipeline"
-            _download_dir(sftp, remote_pipeline, os.path.join(root, "02_pipeline"))
-            sftp.close()
-            t.close()
-        except Exception as exc:  # noqa: BLE001
-            self.report({"ERROR"}, f"FTP sync failed: {exc}")
-            return {"CANCELLED"}
-        self.report({"INFO"}, "Pulled latest pipeline config. Now Apply Project Settings.")
-        return {"FINISHED"}
+        if _shell_toolkit(["sync", "--remote", "02_pipeline"], self.report):
+            self.report({"INFO"}, "Synced latest config. Now Apply Project Settings.")
+            return {"FINISHED"}
+        return {"CANCELLED"}
 
 
-def _download_dir(sftp, remote_dir, local_dir):
-    import stat as _stat
-    os.makedirs(local_dir, exist_ok=True)
-    for entry in sftp.listdir_attr(remote_dir):
-        rpath = remote_dir + "/" + entry.filename
-        lpath = os.path.join(local_dir, entry.filename)
-        if _stat.S_ISDIR(entry.st_mode):
-            _download_dir(sftp, rpath, lpath)
-        else:
-            sftp.get(rpath, lpath)
-
-
-def active_task() -> dict | None:
+def active_task():
     """The task this Blender session was opened for (set by the Workspace app via
     env vars), or None if Blender was launched without a task context."""
     tid = os.environ.get("LEGAMI_TASK_ID")
@@ -327,10 +285,63 @@ class LEGAMI_OT_save_to_task(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _next_version(folder: str, base: str) -> int:
+    if not os.path.isdir(folder):
+        return 1
+    existing = [f for f in os.listdir(folder)
+                if f.startswith(base + "_v") and f.endswith(".blend")]
+    return len(existing) + 1
+
+
+class LEGAMI_OT_publish(bpy.types.Operator):
+    bl_idname = "legami.publish"
+    bl_label = "Publish"
+    bl_description = ("Write a versioned .blend into this task's publish/ folder, "
+                      "upload it, and set the task to Review")
+
+    def execute(self, context):
+        task = active_task()
+        if not task or not task["work_dir"]:
+            self.report({"ERROR"}, "No active task. Open this scene from the "
+                                   "Workspace app's 'Open in Blender'.")
+            return {"CANCELLED"}
+
+        # publish/ is a sibling of the task's work/ folder
+        publish_dir = os.path.join(os.path.dirname(task["work_dir"]), "publish")
+        os.makedirs(publish_dir, exist_ok=True)
+        name = task["entity"].split("/")[-1]
+        base = f"{name}_{task['step']}"
+        version = _next_version(publish_dir, base)
+        pub_path = os.path.join(publish_dir, f"{base}_v{version:03d}.blend")
+
+        # Write a copy to publish/ without changing the working file.
+        bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)
+
+        py = os.environ.get("LEGAMI_TOOLKIT_PY")
+        td = os.environ.get("LEGAMI_TOOLKIT_DIR")
+        if not py or not td:
+            self.report({"WARNING"},
+                        f"Saved {os.path.basename(pub_path)} to publish/, but the "
+                        f"toolkit wasn't found to upload — push it via the Workspace app.")
+            return {"FINISHED"}
+
+        try:
+            subprocess.check_call(
+                [py, "-m", "animpipe", "publish", "--local", pub_path,
+                 "--task", task["id"], "--status", "review"], cwd=td)
+        except Exception as exc:  # noqa: BLE001
+            self.report({"ERROR"}, f"Saved locally but upload failed: {exc}")
+            return {"CANCELLED"}
+
+        self.report({"INFO"},
+                    f"Published {os.path.basename(pub_path)}; task set to Review.")
+        return {"FINISHED"}
+
+
 CLASSES = (
     LEGAMI_OT_apply_project_settings,
     LEGAMI_OT_verify_ocio,
-    LEGAMI_OT_install_deps,
     LEGAMI_OT_pull_settings,
     LEGAMI_OT_save_to_task,
+    LEGAMI_OT_publish,
 )

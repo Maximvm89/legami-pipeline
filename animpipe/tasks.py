@@ -55,6 +55,30 @@ def steps_for(schema: dict, ttype: str) -> list[str]:
 def delete_task(sftp, remote_root: str, task_id: str) -> None:
     sftp.remove(tasks_dir(remote_root) + "/" + task_id + ".json")
 
+
+def get_task(sftp, remote_root: str, task_id: str) -> dict | None:
+    return _load_one(sftp, remote_root, task_id)
+
+
+def publish_task(sftp, remote_root: str, username: str, local_file: str,
+                 task_id: str, status: str = "review") -> str | None:
+    """Publish a file for a task: upload it into the task's publish/ folder,
+    record attribution, and advance the task status. Returns the published rel
+    path, or None if the task doesn't exist."""
+    import os as _os
+    from . import ledger
+
+    task = get_task(sftp, remote_root, task_id)
+    if not task:
+        return None
+    rel = task_dir_rel(task) + "/publish/" + _os.path.basename(local_file)
+    remote_abs = remote_root.rstrip("/") + "/" + rel
+    sftp.upload(local_file, remote_abs)
+    ledger.record_uploads(sftp, remote_root, username, [rel])
+    if status:
+        set_status(sftp, remote_root, task_id, status, actor=username)
+    return rel
+
 STATUSES = ["todo", "in_progress", "review", "done"]
 STATUS_LABELS = {
     "todo": "To do",

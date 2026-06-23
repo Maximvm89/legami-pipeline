@@ -3,8 +3,6 @@
 Kept free of `bpy` so it can be unit-tested outside Blender.
 """
 
-from __future__ import annotations
-
 import json
 import os
 
