@@ -67,6 +67,24 @@ class FakeSFTP:
         pass
 
 
+def test_parallel_walk_correctness():
+    from animpipe.sftp import parallel_walk
+    # fake remote filesystem: path -> entries
+    fs = {
+        "/r": [{"name": "a", "is_dir": True, "size": 0, "mtime": 0},
+               {"name": "f0.txt", "is_dir": False, "size": 5, "mtime": 1}],
+        "/r/a": [{"name": "b", "is_dir": True, "size": 0, "mtime": 0},
+                 {"name": "f1.txt", "is_dir": False, "size": 6, "mtime": 2}],
+        "/r/a/b": [{"name": "f2.txt", "is_dir": False, "size": 7, "mtime": 3}],
+    }
+    rows = parallel_walk(lambda p: fs.get(p, []), "/r", workers=4)
+    rels = {r["rel"] for r in rows}
+    assert rels == {"a", "f0.txt", "a/b", "a/f1.txt", "a/b/f2.txt"}
+    sizes = {r["rel"]: r["size"] for r in rows}
+    assert sizes["a/b/f2.txt"] == 7
+    assert sum(1 for r in rows if r["is_dir"]) == 2  # a, a/b
+
+
 def _client_with_fake():
     c = SFTPClient(SFTPCredentials(host="x", port=22, user="x"), dry_run=False)
     c._sftp = FakeSFTP()

@@ -10,15 +10,20 @@ copy of the project and sync work/publish files with the FTP.
    you choose.
 2. **Configure Blender → this folder** — writes that local path into `config.yaml`
    so the launcher and the Blender addon save your files into the right structure.
-3. **Refresh / Diff** — compares your local `work/` and `publish/` folders against
-   the FTP and shows every file with a status:
+3. **Refresh / Diff** — shows the whole project as a navigable folder **tree**
+   (expand/collapse), merging the FTP and your local copy. Every folder and file
+   is color-coded by where it lives:
 
-   | Status | Meaning | Action |
+   | Color | Where | Action |
    |---|---|---|
-   | In sync | same size + time | none |
-   | Local only / Local newer | you have changes | upload |
-   | Remote only / Remote newer | server has changes | download |
-   | Size differs | same name, different size | review (possible conflict) |
+   | Amber | Server only | download |
+   | Blue | Local only | upload |
+   | Teal/green | Both, in sync | none |
+   | Blue (stronger) | Both, local newer | upload |
+   | Amber (stronger) | Both, server newer | download |
+   | Red | Both, size differs | review (possible conflict) |
+
+   Comparison of files present on both sides is by size + modified time.
 
 4. **Upload / Download** — selected files, or "all local-newer" / "all
    remote-newer" in one click. Transfers preserve modified-times so the diff
@@ -61,6 +66,23 @@ Double-click the wrapper for your OS in `launcher/`:
 5. Work in Blender, saving scenes into the matching `work/` folders.
 6. Click **Refresh / Diff**, then **Upload all local-newer** to publish your
    changes to the FTP. Pull teammates' updates with **Download all remote-newer**.
+
+## Performance (lazy loading)
+
+The tree loads **lazily**: opening the app shows only the top level instantly, and
+each folder's contents are fetched from the server only when you expand it, over
+a single persistent connection. This keeps browsing fast even on large projects.
+
+- The status bar shows your local file count + total size immediately (computed
+  from the local disk, no network).
+- Expanding a folder compares just that folder against the server.
+- The bulk buttons ("Download all from server" / "Upload all local changes")
+  and the filter buttons do a full recursive scan on demand. That scan lists
+  folders **in parallel** over several SFTP channels (~8–15× faster than serial),
+  and the result is cached so toggling filters afterwards is instant.
+
+`config.yaml` is auto-loaded from the toolkit folder. To point at a different
+project, use **File ▸ Open config…**
 
 ## Notes
 

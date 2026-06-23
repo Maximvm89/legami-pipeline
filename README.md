@@ -14,7 +14,7 @@ but the structure is generic enough to adapt to any DCC pipeline.
 |---|---|---|
 | `animpipe` | Python CLI: builds the project folder tree on SFTP, uploads/downloads, and launches Blender with the right OCIO config. | [`animpipe/`](animpipe/) |
 | `legami_pipeline` | Blender add-on: pulls project settings from SFTP and applies color/render/units/output to every scene. | [`blender_addon/`](blender_addon/) |
-| `workspace_app` | PySide6 desktop GUI: mirrors the structure locally and shows a live size + diff view to sync work/publish files. | [`workspace_app/`](workspace_app/) |
+| `workspace_app` | PySide6 desktop GUI: mirrors the structure locally and shows a navigable, color-coded tree of the whole project (server-only / local-only / both) with multi-select filters and one-click upload/download. | [`workspace_app/`](workspace_app/) |
 | Color pipeline | Pinned ACES OCIO config + the Blender/Premiere color policy. | [`color_pipeline/`](color_pipeline/) |
 | Launchers | Cross-platform double-click setup and run scripts (Win/Mac/Linux). | [`launcher/`](launcher/) |
 

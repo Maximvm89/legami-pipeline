@@ -8,10 +8,60 @@ from __future__ import annotations
 
 import os
 import posixpath
+import queue
 import stat as stat_mod
-from typing import Iterable
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Iterable
 
 from .config import SFTPCredentials
+
+
+def parallel_walk(list_dir: "Callable[[str], list[dict]]", root: str,
+                  workers: int = 8) -> list[dict]:
+    """Breadth-first walk that lists directories concurrently.
+
+    `list_dir(path)` returns raw entries: dicts with name, is_dir, size, mtime.
+    Returns flat list of dicts with rel (relative to root), is_dir, size, mtime.
+    Pure of any SFTP specifics, so it's unit-testable with a fake list_dir.
+    """
+    results: list[dict] = []
+    rlock = threading.Lock()
+    state_lock = threading.Condition()
+    outstanding = [0]
+    ex = ThreadPoolExecutor(max_workers=max(1, workers))
+
+    def submit(path: str, rel: str):
+        with state_lock:
+            outstanding[0] += 1
+        ex.submit(task, path, rel)
+
+    def task(path: str, rel: str):
+        try:
+            local = []
+            subs = []
+            for e in list_dir(path):
+                erel = f"{rel}/{e['name']}" if rel else e["name"]
+                local.append({"rel": erel, "is_dir": e["is_dir"],
+                              "size": e["size"], "mtime": e["mtime"]})
+                if e["is_dir"]:
+                    subs.append((f"{path}/{e['name']}", erel))
+            with rlock:
+                results.extend(local)
+            for sp, sr in subs:
+                submit(sp, sr)
+        finally:
+            with state_lock:
+                outstanding[0] -= 1
+                if outstanding[0] == 0:
+                    state_lock.notify_all()
+
+    submit(root, "")
+    with state_lock:
+        while outstanding[0] > 0:
+            state_lock.wait()
+    ex.shutdown(wait=True)
+    return results
 
 
 class SFTPClient:
@@ -125,29 +175,66 @@ class SFTPClient:
                 count += 1
         return count
 
-    def walk_remote(self, remote_root: str) -> list[dict]:
-        """Recursively list remote_root. Returns dicts with rel (path relative to
-        remote_root), is_dir, size, mtime. Empty in dry-run."""
+    def walk_remote(self, remote_root: str, workers: int = 8) -> list[dict]:
+        """Recursively list remote_root, listing folders CONCURRENTLY over several
+        SFTP channels (much faster than serial — the scan is latency-bound).
+        Returns dicts with rel, is_dir, size, mtime. Empty in dry-run."""
         if self.dry_run:
             return []
-        results: list[dict] = []
 
-        def _walk(rdir: str, rel: str) -> None:
-            try:
-                entries = self._sftp.listdir_attr(rdir)
-            except IOError:
-                return  # missing dir -> nothing
-            for e in entries:
-                erel = f"{rel}/{e.filename}" if rel else e.filename
-                is_dir = stat_mod.S_ISDIR(e.st_mode)
-                results.append({"rel": erel, "is_dir": is_dir,
-                                "size": int(e.st_size or 0),
-                                "mtime": float(e.st_mtime or 0)})
-                if is_dir:
-                    _walk(posixpath.join(rdir, e.filename), erel)
+        import paramiko
 
-        _walk(remote_root, "")
-        return results
+        # A pool of independent SFTP channels on the same connection — paramiko
+        # channels aren't thread-safe, so each worker borrows its own.
+        chan_pool: "queue.Queue" = queue.Queue()
+        opened = []
+        try:
+            for _ in range(max(1, workers)):
+                try:
+                    ch = paramiko.SFTPClient.from_transport(self._transport)
+                except Exception:  # noqa: BLE001 — fall back to fewer channels
+                    break
+                opened.append(ch)
+                chan_pool.put(ch)
+            if not opened:  # couldn't open extra channels -> use the main one
+                opened.append(self._sftp)
+                chan_pool.put(self._sftp)
+
+            def list_dir(path: str) -> list[dict]:
+                ch = chan_pool.get()
+                try:
+                    entries = ch.listdir_attr(path)
+                except IOError:
+                    return []
+                finally:
+                    chan_pool.put(ch)
+                return [{"name": e.filename,
+                         "is_dir": stat_mod.S_ISDIR(e.st_mode),
+                         "size": int(e.st_size or 0),
+                         "mtime": float(e.st_mtime or 0)} for e in entries]
+
+            return parallel_walk(list_dir, remote_root, workers=len(opened))
+        finally:
+            for ch in opened:
+                if ch is not self._sftp:
+                    try:
+                        ch.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+
+    def listdir(self, remote_dir: str) -> list[dict]:
+        """List ONE remote directory (non-recursive). Returns dicts with name,
+        is_dir, size, mtime. Empty if missing or in dry-run."""
+        if self.dry_run:
+            return []
+        try:
+            entries = self._sftp.listdir_attr(remote_dir)
+        except IOError:
+            return []
+        return [{"name": e.filename,
+                 "is_dir": stat_mod.S_ISDIR(e.st_mode),
+                 "size": int(e.st_size or 0),
+                 "mtime": float(e.st_mtime or 0)} for e in entries]
 
     def upload(self, local_path: str, remote_path: str) -> None:
         """Upload a file, creating parents and preserving mtime (clean diffs)."""

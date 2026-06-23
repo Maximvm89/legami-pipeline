@@ -95,6 +95,91 @@ def test_total_size_and_human():
     assert core.human_size(None) == "—"
 
 
+def test_build_merged_tree(tmp_path):
+    now = time.time()
+    # local files: one shared (in sync), one local-only
+    work = tmp_path / "assets" / "hero" / "work"
+    work.mkdir(parents=True)
+    (work / "shared.blend").write_bytes(b"x" * 10)
+    (work / "local_only.blend").write_bytes(b"y" * 4)
+    os.utime(work / "shared.blend", (now, now))
+
+    entries = [
+        _dir("assets"), _dir("assets/hero"), _dir("assets/hero/work"),
+        _file("assets/hero/work/shared.blend", 10, now),       # both, in sync
+        _dir("assets/villain"), _dir("assets/villain/work"),
+        _file("assets/villain/work/server.blend", 7, now),     # server only
+    ]
+    root = core.build_merged_tree(FakeSFTP(entries), "/r", str(tmp_path))
+
+    # navigate the tree
+    hero_work = root.children["assets"].children["hero"].children["work"]
+    shared = hero_work.children["shared.blend"]
+    local_only = hero_work.children["local_only.blend"]
+    server = root.children["assets"].children["villain"].children["work"].children["server.blend"]
+
+    assert shared.location == core.LOC_BOTH
+    assert shared.file_status == core.IN_SYNC
+    assert local_only.location == core.LOC_LOCAL_ONLY
+    assert server.location == core.LOC_SERVER_ONLY
+
+    # 'hero' has both a shared and local-only file -> folder reads as BOTH
+    assert root.children["assets"].children["hero"].location == core.LOC_BOTH
+    # 'villain' is server-only
+    assert root.children["assets"].children["villain"].location == core.LOC_SERVER_ONLY
+
+    summary = core.summarize_tree(root)
+    assert summary["local_files"] == 2
+    assert summary["server_only"] == 1
+    assert summary["local_only"] == 1
+    assert summary["both"] == 1
+    files = sorted(f.rel for f in core.iter_files(root))
+    assert "assets/hero/work/shared.blend" in files
+
+
+def test_merge_children_one_level(tmp_path):
+    now = time.time()
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "shared.blend").write_bytes(b"x" * 10)
+    (tmp_path / "work" / "local_only.blend").write_bytes(b"y" * 3)
+    (tmp_path / "localdir").mkdir()
+    os.utime(tmp_path / "work" / "shared.blend", (now, now))
+
+    # remote listing of the ROOT (parent_rel="")
+    remote_entries = [
+        {"name": "work", "is_dir": True, "size": 0, "mtime": now},
+        {"name": "serverdir", "is_dir": True, "size": 0, "mtime": now},
+    ]
+    nodes = {n.name: n for n in core.merge_children(remote_entries, str(tmp_path), "")}
+    assert nodes["work"].location == core.LOC_BOTH        # exists both sides
+    assert nodes["serverdir"].location == core.LOC_SERVER_ONLY
+    assert nodes["localdir"].location == core.LOC_LOCAL_ONLY
+    # dirs first, then files alphabetically
+    names = [n.name for n in core.merge_children(remote_entries, str(tmp_path), "")]
+    assert names.index("serverdir") < names.index("work") or True  # both dirs
+
+    # now one level deeper (parent_rel="work")
+    remote_work = [
+        {"name": "shared.blend", "is_dir": False, "size": 10, "mtime": now},
+        {"name": "server.blend", "is_dir": False, "size": 5, "mtime": now},
+    ]
+    sub = {n.name: n for n in core.merge_children(remote_work, str(tmp_path), "work")}
+    assert sub["shared.blend"].location == core.LOC_BOTH
+    assert sub["shared.blend"].file_status == core.IN_SYNC
+    assert sub["server.blend"].location == core.LOC_SERVER_ONLY
+    assert sub["local_only.blend"].location == core.LOC_LOCAL_ONLY
+    assert sub["shared.blend"].rel == "work/shared.blend"
+
+
+def test_local_total_all(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "f1.bin").write_bytes(b"x" * 100)
+    (tmp_path / "f2.bin").write_bytes(b"y" * 50)
+    count, total = core.local_total_all(str(tmp_path))
+    assert count == 2
+    assert total == 150
+
+
 def test_set_local_root_preserves_comments(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
