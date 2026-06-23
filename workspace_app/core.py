@@ -9,9 +9,14 @@ Responsibilities:
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import time
 from dataclasses import dataclass
+
+# Where per-user upload ledgers live on the server (under remote_root).
+UPLOADS_DIR_REL = "02_pipeline/.uploads"
 
 AREA_NAMES = ("work", "publish")
 # junk files we never show or transfer
@@ -187,6 +192,7 @@ class TreeNode:
     remote_size: int | None = None
     local_mtime: float | None = None
     remote_mtime: float | None = None
+    owner: str = ""              # server file owner (from SFTP listing), if any
     children: dict = field(default_factory=dict)
 
     # --- derived ---
@@ -257,8 +263,11 @@ def build_merged_tree(sftp, remote_root: str, local_root: str) -> TreeNode:
         return node
 
     for e in sftp.walk_remote(remote_root):
+        if any(_ignored(part) for part in e["rel"].split("/")):
+            continue  # skip .uploads ledgers, .DS_Store, etc.
         n = ensure(e["rel"], e["is_dir"])
         n.in_remote = True
+        n.owner = e.get("owner", "")
         if not e["is_dir"]:
             n.remote_size = int(e["size"])
             n.remote_mtime = float(e["mtime"])
@@ -307,6 +316,7 @@ def merge_children(remote_entries: list[dict], local_root: str,
         node = TreeNode(name=name, rel=rel, is_dir=is_dir)
         if r:
             node.in_remote = True
+            node.owner = r.get("owner", "")
             if not r["is_dir"]:
                 node.remote_size = r["size"]
                 node.remote_mtime = r["mtime"]
@@ -361,6 +371,22 @@ def summarize_tree(root: TreeNode) -> dict:
                        if f.location == LOC_BOTH and f.file_status != IN_SYNC),
     }
     return out
+
+
+# ===========================================================================
+# Upload attribution — ledgers live in animpipe.ledger (shared with the CLI)
+# ===========================================================================
+from animpipe.ledger import load_ledgers, record_uploads  # noqa: E402,F401
+
+
+def uploader_for(node: TreeNode, ledger: dict[str, tuple[str, float]]) -> str:
+    """Resolve who pushed a file: ledger first, then server file owner."""
+    if node.is_dir:
+        return ""
+    entry = ledger.get(node.rel)
+    if entry:
+        return entry[0]
+    return node.owner or ""
 
 
 def human_size(n: int | None) -> str:

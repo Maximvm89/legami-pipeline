@@ -25,6 +25,13 @@ copy of the project and sync work/publish files with the FTP.
 
    Comparison of files present on both sides is by size + modified time.
 
+The header shows who you're **signed in as** (your SFTP username), and the tree has
+an **Uploaded by** column. Attribution comes from a per-user ledger the tool keeps
+on the server (`02_pipeline/.uploads/<user>.json`, updated when you upload through
+the app), and falls back to the file's server owner from the SFTP listing. Files
+put there outside the tool (e.g. FileZilla) show the server owner if available,
+otherwise blank.
+
 4. **Upload / Download** — selected files, or "all local-newer" / "all
    remote-newer" in one click. Transfers preserve modified-times so the diff
    stays clean.
@@ -32,6 +39,26 @@ copy of the project and sync work/publish files with the FTP.
    and their exact total size, plus counts per status.
 
 Comparison is by **size + modified time** (fast, no full downloads needed).
+
+## Tasks (default tab)
+
+The app opens on a **Tasks** view; the file browser is the second tab.
+
+A *task* is a unit of work = an entity (shot or asset) + a step (department),
+e.g. "animate SEQ010/SH0010" or "model characters/hero". Tasks have a status
+(To do / In progress / Review / Done) and one or more assignees.
+
+- **Show: All tasks / My tasks** — "My tasks" filters to ones assigned to your
+  SFTP username. Plus a status filter.
+- **New task…** — create one by hand (type, entity, step).
+- **Generate from structure** — scans the project and creates a task for every
+  department folder (any folder containing a `work/`), skipping ones that already
+  exist.
+- **Assign me / Unassign me / Assign to…** — manage assignees on selected rows.
+- **Set status … Apply** — move selected tasks through the workflow.
+
+Tasks are stored on the server as one JSON file per task under
+`02_pipeline/tasks/`, so two people editing different tasks never conflict.
 
 ## Install (one-time)
 

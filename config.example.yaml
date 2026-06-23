@@ -17,6 +17,13 @@ project:
 # Path to the folder schema (relative to this config file, or absolute).
 schema: "folder_schema.yaml"
 
+# Optional: naming-convention rules (regex) used to sanity-check new task names.
+# Defaults shown; uncomment to override for your project.
+# naming:
+#   asset_name: "^[a-z0-9][a-z0-9_]*$"   # lowercase letters/digits/underscore
+#   sequence:   "^[A-Z]{2,}\\d{2,}$"      # e.g. SEQ010
+#   shot:       "^[A-Z]{2,}\\d{2,}$"      # e.g. SH0010
+
 # Optional tool paths used by `launch`.
 tools:
   # Explicit Blender executable. Optional — the launcher auto-detects standard

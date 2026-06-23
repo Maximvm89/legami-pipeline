@@ -7,6 +7,7 @@ import os
 import bpy
 
 from . import settings_io
+from . import operators as _ops
 
 
 class LEGAMI_PT_panel(bpy.types.Panel):
@@ -20,6 +21,14 @@ class LEGAMI_PT_panel(bpy.types.Panel):
         layout = self.layout
         prefs = context.preferences.addons[__package__].preferences
         root = settings_io.find_project_root(prefs.local_root)
+
+        task = _ops.active_task()
+        if task:
+            tbox = layout.box()
+            tbox.label(text="Active Task", icon="OUTLINER_OB_ARMATURE")
+            tbox.label(text=f"{task['entity']}")
+            tbox.label(text=f"step: {task['step']}  ({task['type']})")
+            tbox.operator("legami.save_to_task", icon="FILE_TICK")
 
         box = layout.box()
         box.label(text="Project Setup", icon="TOOL_SETTINGS")

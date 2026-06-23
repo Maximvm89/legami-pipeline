@@ -287,9 +287,50 @@ def _download_dir(sftp, remote_dir, local_dir):
             sftp.get(rpath, lpath)
 
 
+def active_task() -> dict | None:
+    """The task this Blender session was opened for (set by the Workspace app via
+    env vars), or None if Blender was launched without a task context."""
+    tid = os.environ.get("LEGAMI_TASK_ID")
+    if not tid:
+        return None
+    return {
+        "id": tid,
+        "type": os.environ.get("LEGAMI_TASK_TYPE", ""),
+        "entity": os.environ.get("LEGAMI_TASK_ENTITY", ""),
+        "step": os.environ.get("LEGAMI_TASK_STEP", ""),
+        "title": os.environ.get("LEGAMI_TASK_TITLE", ""),
+        "work_dir": os.environ.get("LEGAMI_TASK_WORK_DIR", ""),
+    }
+
+
+class LEGAMI_OT_save_to_task(bpy.types.Operator):
+    bl_idname = "legami.save_to_task"
+    bl_label = "Save into task work folder"
+    bl_description = ("Save the current .blend into this task's work/ folder with "
+                      "an auto-incremented version")
+
+    def execute(self, context):
+        task = active_task()
+        if not task or not task["work_dir"]:
+            self.report({"ERROR"}, "No active task. Open this scene from the "
+                                   "Workspace app's 'Open in Blender'.")
+            return {"CANCELLED"}
+        work_dir = task["work_dir"]
+        os.makedirs(work_dir, exist_ok=True)
+        base = f"{task['entity'].replace('/', '_')}_{task['step']}"
+        existing = [f for f in os.listdir(work_dir)
+                    if f.startswith(base) and f.endswith(".blend")]
+        version = len(existing) + 1
+        path = os.path.join(work_dir, f"{base}_v{version:03d}.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        self.report({"INFO"}, f"Saved {os.path.basename(path)}")
+        return {"FINISHED"}
+
+
 CLASSES = (
     LEGAMI_OT_apply_project_settings,
     LEGAMI_OT_verify_ocio,
     LEGAMI_OT_install_deps,
     LEGAMI_OT_pull_settings,
+    LEGAMI_OT_save_to_task,
 )

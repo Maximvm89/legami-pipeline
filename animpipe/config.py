@@ -61,6 +61,7 @@ class ProjectConfig:
     shots: dict[str, list[str]]
     local_root: str | None = None      # where the project is synced on this machine
     blender_path: str | None = None    # explicit Blender executable (optional)
+    naming: dict = None                # naming-convention regex overrides
 
     def resolved_local_root(self) -> str:
         """Local project folder, defaulting to ~/Legami/<CODE> if not set."""
@@ -99,4 +100,5 @@ class ProjectConfig:
             shots=raw.get("shots") or {},
             local_root=project.get("local_root"),
             blender_path=tools.get("blender_path"),
+            naming=raw.get("naming") or {},
         )

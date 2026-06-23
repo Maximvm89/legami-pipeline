@@ -19,11 +19,14 @@ from PySide6.QtGui import QBrush, QColor, QAction
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QTreeWidget, QTreeWidgetItem,
-    QHeaderView, QMessageBox, QAbstractItemView, QGroupBox,
+    QHeaderView, QMessageBox, QAbstractItemView, QGroupBox, QTabWidget,
+    QComboBox, QTableWidget, QTableWidgetItem, QDialog, QFormLayout,
+    QDialogButtonBox, QInputDialog, QMenu,
 )
 
 from animpipe.config import ProjectConfig, SFTPCredentials
 from animpipe.sftp import SFTPClient
+from animpipe import tasks as tasksmod
 from . import core
 
 SERVER_BG, SERVER_FG = QColor(250, 238, 218), QColor(133, 79, 11)
@@ -94,12 +97,15 @@ class MainWindow(QMainWindow):
         self._jobs: list[Job] = []
         self._summary = "Ready."
         self._full_tree: core.TreeNode | None = None  # cached full scan for filters
+        self._ledger: dict = {}  # rel -> (user, time), who uploaded each file
+        self._tasks: list[dict] = []
 
         self._build_menu()
         self._build_ui()
         self._load_config()
-        # Auto-load the top level shortly after the window appears.
-        QTimer.singleShot(150, self._load_root)
+        # Auto-load shortly after the window appears.
+        QTimer.singleShot(150, self._load_tasks)
+        QTimer.singleShot(200, self._load_root)
 
     # ---- connection (persistent, serialized via lock) -----------------------
     def _conn_do(self, fn):
@@ -145,6 +151,10 @@ class MainWindow(QMainWindow):
         self.lbl_project = QLabel("—")
         grid.addWidget(QLabel("Project:"), 0, 0)
         grid.addWidget(self.lbl_project, 0, 1, 1, 3)
+        grid.addWidget(QLabel("Signed in as:"), 4, 0)
+        self.lbl_user = QLabel("—")
+        self.lbl_user.setStyleSheet("font-weight:600;")
+        grid.addWidget(self.lbl_user, 4, 1, 1, 3)
         grid.addWidget(QLabel("Local folder:"), 1, 0)
         self.ed_local = QLineEdit()
         grid.addWidget(self.ed_local, 1, 1, 1, 2)
@@ -158,6 +168,19 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.ed_pass, 2, 1, 1, 2)
         outer.addWidget(box)
 
+        self.tabs = QTabWidget()
+        outer.addWidget(self.tabs, 1)
+        self.tabs.addTab(self._build_tasks_page(), "Tasks")
+        self.tabs.addTab(self._build_files_page(), "Files")
+        self.tabs.setCurrentIndex(0)  # Tasks is the default view
+
+        self.status = self.statusBar()
+        self.status.showMessage("Ready.")
+
+    def _build_files_page(self) -> QWidget:
+        page = QWidget()
+        fl = QVBoxLayout(page)
+
         actions = QHBoxLayout()
         self.b_mirror = QPushButton("Create Local Structure")
         self.b_mirror.clicked.connect(self._on_mirror)
@@ -169,10 +192,8 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.b_configure)
         actions.addStretch(1)
         actions.addWidget(self.b_refresh)
-        outer.addLayout(actions)
+        fl.addLayout(actions)
 
-        # Filter buttons (multi-select). Toggling any runs a full scan and shows
-        # only matching files; unchecking all returns to fast lazy browsing.
         filt = QHBoxLayout()
         filt.addWidget(QLabel("Filter:"))
         self._filter_btns: dict[str, QPushButton] = {}
@@ -190,17 +211,18 @@ class MainWindow(QMainWindow):
             self._filter_btns[key] = b
             filt.addWidget(b)
         filt.addStretch(1)
-        outer.addLayout(filt)
+        fl.addLayout(filt)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(5)
-        self.tree.setHeaderLabels(["Name", "Where", "Local", "Remote", "Modified"])
+        self.tree.setColumnCount(6)
+        self.tree.setHeaderLabels(
+            ["Name", "Where", "Uploaded by", "Local", "Remote", "Modified"])
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 5):
+        for col in range(1, 6):
             self.tree.header().setSectionResizeMode(col, QHeaderView.ResizeToContents)
         self.tree.itemExpanded.connect(self._on_expand)
-        outer.addWidget(self.tree, 1)
+        fl.addWidget(self.tree, 1)
 
         transfer = QHBoxLayout()
         self.b_download = QPushButton("⬇ Download selected")
@@ -213,10 +235,78 @@ class MainWindow(QMainWindow):
         self.b_upload_all.clicked.connect(lambda: self._on_transfer("upload", False))
         for b in (self.b_download, self.b_upload, self.b_download_all, self.b_upload_all):
             transfer.addWidget(b)
-        outer.addLayout(transfer)
+        fl.addLayout(transfer)
+        return page
 
-        self.status = self.statusBar()
-        self.status.showMessage("Ready.")
+    def _build_tasks_page(self) -> QWidget:
+        page = QWidget()
+        tl = QVBoxLayout(page)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Show:"))
+        self.cb_scope = QComboBox()
+        self.cb_scope.addItems(["My tasks", "All tasks"])  # default: My tasks
+        self.cb_scope.currentIndexChanged.connect(self._render_tasks)
+        controls.addWidget(self.cb_scope)
+        controls.addWidget(QLabel("Status:"))
+        self.cb_status_filter = QComboBox()
+        self.cb_status_filter.addItem("All", None)
+        for s in tasksmod.STATUSES:
+            self.cb_status_filter.addItem(tasksmod.STATUS_LABELS[s], s)
+        self.cb_status_filter.currentIndexChanged.connect(self._render_tasks)
+        controls.addWidget(self.cb_status_filter)
+        controls.addSpacing(12)
+        self.ed_search = QLineEdit()
+        self.ed_search.setPlaceholderText("Search… (entity, step, assignee)")
+        self.ed_search.setClearButtonEnabled(True)
+        self.ed_search.textChanged.connect(self._render_tasks)
+        self.ed_search.setMinimumWidth(220)
+        controls.addWidget(self.ed_search, 1)
+        controls.addStretch(0)
+        b_new = QPushButton("New task…")
+        b_new.clicked.connect(self._new_task)
+        b_gen = QPushButton("Generate from structure")
+        b_gen.clicked.connect(self._generate_tasks)
+        b_reload = QPushButton("Refresh")
+        b_reload.clicked.connect(self._load_tasks)
+        controls.addWidget(b_new)
+        controls.addWidget(b_gen)
+        controls.addWidget(b_reload)
+        tl.addLayout(controls)
+
+        self.tasks_table = QTableWidget(0, 6)
+        self.tasks_table.setHorizontalHeaderLabels(
+            ["Type", "Entity", "Step", "Status", "Assignees", "Updated by"])
+        self.tasks_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tasks_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tasks_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tasks_table.setSortingEnabled(True)
+        self.tasks_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tasks_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tasks_table.customContextMenuRequested.connect(self._task_context_menu)
+        tl.addWidget(self.tasks_table, 1)
+
+        rowops = QHBoxLayout()
+        b_assign_me = QPushButton("Assign me")
+        b_assign_me.clicked.connect(lambda: self._assign_selected(self._creds().user, True))
+        b_unassign_me = QPushButton("Unassign me")
+        b_unassign_me.clicked.connect(lambda: self._assign_selected(self._creds().user, False))
+        b_assign_to = QPushButton("Assign to…")
+        b_assign_to.clicked.connect(self._assign_to)
+        rowops.addWidget(b_assign_me)
+        rowops.addWidget(b_unassign_me)
+        rowops.addWidget(b_assign_to)
+        rowops.addStretch(1)
+        rowops.addWidget(QLabel("Set status:"))
+        self.cb_set_status = QComboBox()
+        for s in tasksmod.STATUSES:
+            self.cb_set_status.addItem(tasksmod.STATUS_LABELS[s], s)
+        rowops.addWidget(self.cb_set_status)
+        b_apply_status = QPushButton("Apply")
+        b_apply_status.clicked.connect(self._apply_status)
+        rowops.addWidget(b_apply_status)
+        tl.addLayout(rowops)
+        return page
 
     # ---- config / creds -----------------------------------------------------
     def _load_config(self):
@@ -232,6 +322,10 @@ class MainWindow(QMainWindow):
         self.lbl_project.setText(f"{self.cfg.name} [{self.cfg.code}]  →  {self.cfg.remote_root}")
         if not self.ed_local.text().strip():
             self.ed_local.setText(self.cfg.resolved_local_root())
+        try:
+            self.lbl_user.setText(SFTPCredentials.from_env(".env").user)
+        except Exception:  # noqa: BLE001
+            self.lbl_user.setText("(set your login in .env)")
 
     def _creds(self) -> SFTPCredentials:
         creds = SFTPCredentials.from_env(".env")
@@ -316,12 +410,13 @@ class MainWindow(QMainWindow):
         label, bg, fg = node_style(node)
         cols = [
             node.name, label,
+            core.uploader_for(node, self._ledger),
             core.human_size(node.local_size) if node.in_local and not node.is_dir else "",
             core.human_size(node.remote_size) if node.in_remote and not node.is_dir else "",
             _fmt_time(node.local_mtime or node.remote_mtime),
         ]
         item = QTreeWidgetItem(cols)
-        for c in range(5):
+        for c in range(6):
             item.setBackground(c, QBrush(bg))
             item.setForeground(c, QBrush(fg))
         item.setData(0, ROLE_NODE, node)
@@ -340,14 +435,16 @@ class MainWindow(QMainWindow):
         remote = self.cfg.remote_root
 
         def work():
+            ledger = self._conn_do(lambda c: core.load_ledgers(c, remote))
             children = self._conn_do(lambda c: core.merge_children(
                 c.listdir(remote), local, ""))
             count, total = core.local_total_all(local)
-            return children, count, total
+            return children, count, total, ledger
 
         def done(result):
             self._busy_buttons(False)
-            children, count, total = result
+            children, count, total, ledger = result
+            self._ledger = ledger
             self.tree.clear()
             for node in children:
                 self.tree.addTopLevelItem(self._make_item(node))
@@ -410,11 +507,15 @@ class MainWindow(QMainWindow):
         remote = self.cfg.remote_root
 
         def work():
-            return self._conn_do(lambda c: core.build_merged_tree(c, remote, local))
+            ledger = self._conn_do(lambda c: core.load_ledgers(c, remote))
+            tree = self._conn_do(lambda c: core.build_merged_tree(c, remote, local))
+            return tree, ledger
 
-        def done(tree):
+        def done(result):
             self._busy_buttons(False)
+            tree, ledger = result
             self._full_tree = tree
+            self._ledger = ledger
             self._populate_filtered(tree, self._active_filters())
 
         self._busy_buttons(True)
@@ -470,6 +571,7 @@ class MainWindow(QMainWindow):
             return
         local_root = self.ed_local.text().strip()
         remote_root = self.cfg.remote_root
+        username = self._creds().user
         pred = is_download_candidate if direction == "download" else is_upload_candidate
         roots = self._selected_nodes() if selected else [None]  # None = whole project
         if selected and not roots:
@@ -504,6 +606,9 @@ class MainWindow(QMainWindow):
                 lp = core.local_path_for(local_root, f.rel)
                 self._conn_do(lambda c, a=lp, b=rp:
                               c.upload(a, b) if direction == "upload" else c.download(b, a))
+            if direction == "upload":
+                self._conn_do(lambda c: core.record_uploads(
+                    c, remote_root, username, [f.rel for f in files]))
             return len(files)
 
         def done(n):
@@ -516,6 +621,355 @@ class MainWindow(QMainWindow):
 
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg=f"{verb}ing…")
+
+
+    # ---- tasks --------------------------------------------------------------
+    def _load_tasks(self):
+        if not self.cfg:
+            return
+        remote = self.cfg.remote_root
+
+        def work():
+            return self._conn_do(lambda c: tasksmod.load_tasks(c, remote))
+
+        def done(tasks):
+            self._busy_buttons(False)
+            self._tasks = tasks
+            self._render_tasks()
+            self.status.showMessage(f"{len(tasks)} task(s) loaded.")
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Loading tasks…")
+
+    def _render_tasks(self):
+        scope_mine = self.cb_scope.currentText() == "My tasks"
+        me = self._creds_user_safe()
+        status_filter = self.cb_status_filter.currentData()
+        query = self.ed_search.text()
+
+        rows = []
+        for t in self._tasks:
+            if scope_mine and me not in (t.get("assignees") or []):
+                continue
+            if status_filter and t.get("status") != status_filter:
+                continue
+            if not tasksmod.matches_query(t, query):
+                continue
+            rows.append(t)
+        rows.sort(key=lambda t: (t.get("type", ""), t.get("entity", ""), t.get("step", "")))
+
+        self.tasks_table.setSortingEnabled(False)
+        self.tasks_table.setRowCount(len(rows))
+        for i, t in enumerate(rows):
+            cells = [
+                t.get("type", ""), t.get("entity", ""), t.get("step", ""),
+                tasksmod.STATUS_LABELS.get(t.get("status", ""), t.get("status", "")),
+                ", ".join(t.get("assignees") or []),
+                t.get("updated_by", ""),
+            ]
+            for j, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                if j == 0:
+                    item.setData(Qt.UserRole, t)
+                self.tasks_table.setItem(i, j, item)
+        self.tasks_table.setSortingEnabled(True)
+
+    def _creds_user_safe(self) -> str:
+        try:
+            return self._creds().user
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _selected_tasks(self) -> list[dict]:
+        out = []
+        for idx in self.tasks_table.selectionModel().selectedRows():
+            item = self.tasks_table.item(idx.row(), 0)
+            t = item.data(Qt.UserRole) if item else None
+            if t:
+                out.append(t)
+        return out
+
+    def _assign_selected(self, username: str, add: bool):
+        if not self.cfg or not username:
+            return
+        chosen = self._selected_tasks()
+        if not chosen:
+            QMessageBox.information(self, "No tasks selected", "Select tasks first.")
+            return
+        remote = self.cfg.remote_root
+        actor = self._creds_user_safe()
+        ids = [t["id"] for t in chosen]
+
+        def work():
+            for tid in ids:
+                self._conn_do(lambda c, x=tid: tasksmod.assign(
+                    c, remote, x, username, add=add, actor=actor))
+            return len(ids)
+
+        def done(n):
+            self._busy_buttons(False)
+            self._load_tasks()
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Updating assignees…")
+
+    def _assign_to(self):
+        name, ok = QInputDialog.getText(self, "Assign to", "Username:")
+        if ok and name.strip():
+            self._assign_selected(name.strip(), True)
+
+    def _apply_status(self):
+        if not self.cfg:
+            return
+        status = self.cb_set_status.currentData()
+        chosen = self._selected_tasks()
+        if not chosen:
+            QMessageBox.information(self, "No tasks selected", "Select tasks first.")
+            return
+        remote = self.cfg.remote_root
+        actor = self._creds_user_safe()
+        ids = [t["id"] for t in chosen]
+
+        def work():
+            for tid in ids:
+                self._conn_do(lambda c, x=tid: tasksmod.set_status(
+                    c, remote, x, status, actor=actor))
+            return len(ids)
+
+        def done(n):
+            self._busy_buttons(False)
+            self._load_tasks()
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Updating status…")
+
+    def _task_context_menu(self, pos):
+        item = self.tasks_table.itemAt(pos)
+        if not item:
+            return
+        t = self.tasks_table.item(item.row(), 0).data(Qt.UserRole)
+        if not t:
+            return
+        menu = QMenu(self)
+        act_open = menu.addAction("Open in Blender")
+        menu.addSeparator()
+        act_delete = menu.addAction("Delete task")
+        chosen = menu.exec(self.tasks_table.viewport().mapToGlobal(pos))
+        if chosen == act_open:
+            self._open_task_in_blender(t)
+        elif chosen == act_delete:
+            self._delete_task(t)
+
+    def _open_task_in_blender(self, task: dict):
+        if not self.cfg:
+            return
+        from animpipe.launcher import launch
+        local_root = self.ed_local.text().strip() or self.cfg.resolved_local_root()
+        # Make the launcher sync + save into the same folder the GUI uses.
+        self.cfg.local_root = local_root
+        work_abs = os.path.join(local_root, *tasksmod.task_work_rel(task).split("/"))
+        extra_env = {
+            "LEGAMI_TASK_ID": task.get("id", ""),
+            "LEGAMI_TASK_TYPE": task.get("type", ""),
+            "LEGAMI_TASK_ENTITY": task.get("entity", ""),
+            "LEGAMI_TASK_STEP": task.get("step", ""),
+            "LEGAMI_TASK_TITLE": task.get("title", ""),
+            "LEGAMI_TASK_WORK_DIR": work_abs,
+        }
+        cfg = self.cfg
+        creds = self._creds()
+
+        def work():
+            return launch(cfg, creds, extra_env=extra_env)
+
+        def done(rc):
+            self._busy_buttons(False)
+            if rc == 0:
+                self.status.showMessage(
+                    f"Opening Blender for {task.get('entity')} — {task.get('step')}")
+            else:
+                QMessageBox.warning(
+                    self, "Could not launch Blender",
+                    "Blender wasn't found. Set tools.blender_path in config.yaml "
+                    "or the LEGAMI_BLENDER environment variable.")
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Syncing config + launching Blender…")
+
+    def _new_task(self):
+        if not self.cfg:
+            return
+        schema = self.cfg.schema
+        spec = {
+            "asset_categories": tasksmod.asset_categories(schema),
+            "asset_steps": tasksmod.steps_for(schema, "asset"),
+            "shot_steps": tasksmod.steps_for(schema, "shot"),
+            "naming": self.cfg.naming or {},
+        }
+        dlg = NewTaskDialog(spec, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        data = dlg.values()
+        remote = self.cfg.remote_root
+        actor = self._creds_user_safe()
+        task = tasksmod.new_task(data["type"], data["entity"], data["step"],
+                                 title=data["title"] or None)
+
+        def work():
+            return self._conn_do(lambda c: tasksmod.save_task(c, remote, task, actor))
+
+        self._busy_buttons(True)
+        self._spawn(work, lambda _r: (self._busy_buttons(False), self._load_tasks()),
+                    busy_msg="Creating task…")
+
+    def _delete_task(self, task: dict):
+        if not self.cfg:
+            return
+        if QMessageBox.question(
+                self, "Delete task?",
+                f"Delete task '{task.get('entity')} — {task.get('step')}'?\n"
+                f"This removes it from the server.") != QMessageBox.Yes:
+            return
+        remote = self.cfg.remote_root
+        tid = task["id"]
+
+        def work():
+            return self._conn_do(lambda c: tasksmod.delete_task(c, remote, tid))
+
+        self._busy_buttons(True)
+        self._spawn(work, lambda _r: (self._busy_buttons(False), self._load_tasks()),
+                    busy_msg="Deleting task…")
+
+    def _generate_tasks(self):
+        if not self.cfg:
+            return
+        remote = self.cfg.remote_root
+        local = self.ed_local.text().strip()
+
+        def work():
+            tree = self._conn_do(lambda c: core.build_merged_tree(c, remote, local))
+            generated = tasksmod.generate_from_tree(tree)
+            existing = {t["id"] for t in self._conn_do(
+                lambda c: tasksmod.load_tasks(c, remote))}
+            created = 0
+            for t in generated:
+                if t["id"] not in existing:
+                    self._conn_do(lambda c, x=t: tasksmod.save_task(c, remote, x))
+                    created += 1
+            return created
+
+        def done(created):
+            self._busy_buttons(False)
+            self.status.showMessage(f"Generated {created} new task(s).")
+            self._load_tasks()
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Scanning structure for tasks…")
+
+
+class NewTaskDialog(QDialog):
+    """Type and Step are dropdowns (from the schema); the entity is typed and
+    validated against the project naming convention so names stay consistent."""
+    def __init__(self, spec: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("New task")
+        self.spec = spec
+        self.naming = spec.get("naming") or {}
+        root = QVBoxLayout(self)
+
+        top = QFormLayout()
+        self.cb_type = QComboBox()
+        self.cb_type.addItems(["shot", "asset"])
+        self.cb_type.currentTextChanged.connect(self._on_type)
+        top.addRow("Type", self.cb_type)
+        root.addLayout(top)
+
+        # Asset inputs: category dropdown + typed name
+        self.asset_box = QWidget()
+        af = QFormLayout(self.asset_box)
+        af.setContentsMargins(0, 0, 0, 0)
+        self.cb_category = QComboBox()
+        self.cb_category.addItems(spec.get("asset_categories") or [])
+        self.ed_asset_name = QLineEdit()
+        self.ed_asset_name.setPlaceholderText(tasksmod.NAMING_HINTS["asset_name"])
+        af.addRow("Category", self.cb_category)
+        af.addRow("Asset name", self.ed_asset_name)
+        root.addWidget(self.asset_box)
+
+        # Shot inputs: sequence + shot codes
+        self.shot_box = QWidget()
+        sf = QFormLayout(self.shot_box)
+        sf.setContentsMargins(0, 0, 0, 0)
+        self.ed_seq = QLineEdit()
+        self.ed_seq.setPlaceholderText(tasksmod.NAMING_HINTS["sequence"])
+        self.ed_shot = QLineEdit()
+        self.ed_shot.setPlaceholderText(tasksmod.NAMING_HINTS["shot"])
+        sf.addRow("Sequence", self.ed_seq)
+        sf.addRow("Shot", self.ed_shot)
+        root.addWidget(self.shot_box)
+
+        bottom = QFormLayout()
+        self.cb_step = QComboBox()
+        self.ed_title = QLineEdit()
+        self.ed_title.setPlaceholderText("(optional)")
+        bottom.addRow("Step", self.cb_step)
+        bottom.addRow("Title", self.ed_title)
+        root.addLayout(bottom)
+
+        self.lbl_err = QLabel("")
+        self.lbl_err.setStyleSheet("color:#A32D2D;")
+        self.lbl_err.setWordWrap(True)
+        root.addWidget(self.lbl_err)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._on_ok)
+        bb.rejected.connect(self.reject)
+        root.addWidget(bb)
+
+        self._on_type(self.cb_type.currentText())
+
+    def _on_type(self, ttype):
+        is_asset = ttype == "asset"
+        self.asset_box.setVisible(is_asset)
+        self.shot_box.setVisible(not is_asset)
+        self.cb_step.clear()
+        self.cb_step.addItems(self.spec.get(
+            "asset_steps" if is_asset else "shot_steps") or [])
+        self.adjustSize()
+
+    def _on_ok(self):
+        ttype = self.cb_type.currentText()
+        if ttype == "asset":
+            name = self.ed_asset_name.text().strip()
+            if not self.cb_category.currentText():
+                return self._err("Pick an asset category.")
+            if not tasksmod.validate_name(self.naming, "asset_name", name):
+                return self._err("Asset name invalid: "
+                                 + tasksmod.NAMING_HINTS["asset_name"])
+            self._entity = f"{self.cb_category.currentText()}/{name}"
+        else:
+            seq = self.ed_seq.text().strip()
+            shot = self.ed_shot.text().strip()
+            if not tasksmod.validate_name(self.naming, "sequence", seq):
+                return self._err("Sequence invalid: "
+                                 + tasksmod.NAMING_HINTS["sequence"])
+            if not tasksmod.validate_name(self.naming, "shot", shot):
+                return self._err("Shot invalid: " + tasksmod.NAMING_HINTS["shot"])
+            self._entity = f"{seq}/{shot}"
+        if not self.cb_step.currentText():
+            return self._err("Pick a step.")
+        self.accept()
+
+    def _err(self, msg):
+        self.lbl_err.setText(msg)
+
+    def values(self) -> dict:
+        return {
+            "type": self.cb_type.currentText(),
+            "entity": self._entity,
+            "step": self.cb_step.currentText(),
+            "title": self.ed_title.text().strip(),
+        }
 
 
 def main():

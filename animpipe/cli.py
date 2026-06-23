@@ -115,7 +115,12 @@ def cmd_put(args) -> int:
 
     print(f"Upload: {args.local}\n    -> {remote}\n")
     with _client(args) as client:
-        client.put(args.local, remote)
+        client.upload(args.local, remote)  # preserves mtime (clean diffs)
+        # Record attribution in the ledger (rel path under remote_root).
+        if not args.dry_run and remote.startswith(cfg.remote_root):
+            from . import ledger
+            rel = _pp.relpath(remote, cfg.remote_root)
+            ledger.record_uploads(client, cfg.remote_root, client.creds.user, [rel])
     print("done." if not args.dry_run else "(dry-run: nothing uploaded)")
     return 0
 

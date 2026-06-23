@@ -42,8 +42,9 @@ def parallel_walk(list_dir: "Callable[[str], list[dict]]", root: str,
             subs = []
             for e in list_dir(path):
                 erel = f"{rel}/{e['name']}" if rel else e["name"]
-                local.append({"rel": erel, "is_dir": e["is_dir"],
-                              "size": e["size"], "mtime": e["mtime"]})
+                row = {k: v for k, v in e.items() if k != "name"}
+                row["rel"] = erel
+                local.append(row)
                 if e["is_dir"]:
                     subs.append((f"{path}/{e['name']}", erel))
             with rlock:
@@ -62,6 +63,17 @@ def parallel_walk(list_dir: "Callable[[str], list[dict]]", root: str,
             state_lock.wait()
     ex.shutdown(wait=True)
     return results
+
+
+def _owner_from_attr(entry) -> str:
+    """Extract the owner name from an SFTP entry's `ls -l` style longname.
+    e.g. '-rw-r--r-- 1 marco.parisi staff 1234 ... name' -> 'marco.parisi'.
+    Returns '' if the server doesn't expose a name."""
+    longname = getattr(entry, "longname", "") or ""
+    parts = longname.split()
+    owner = parts[2] if len(parts) >= 3 else ""
+    # numeric uid (no name resolution on server) isn't useful -> drop it
+    return "" if owner.isdigit() else owner
 
 
 class SFTPClient:
@@ -211,7 +223,8 @@ class SFTPClient:
                 return [{"name": e.filename,
                          "is_dir": stat_mod.S_ISDIR(e.st_mode),
                          "size": int(e.st_size or 0),
-                         "mtime": float(e.st_mtime or 0)} for e in entries]
+                         "mtime": float(e.st_mtime or 0),
+                         "owner": _owner_from_attr(e)} for e in entries]
 
             return parallel_walk(list_dir, remote_root, workers=len(opened))
         finally:
@@ -234,7 +247,38 @@ class SFTPClient:
         return [{"name": e.filename,
                  "is_dir": stat_mod.S_ISDIR(e.st_mode),
                  "size": int(e.st_size or 0),
-                 "mtime": float(e.st_mtime or 0)} for e in entries]
+                 "mtime": float(e.st_mtime or 0),
+                 "owner": _owner_from_attr(e)} for e in entries]
+
+    def remove(self, remote_path: str) -> None:
+        """Delete a remote file. Silent if missing or in dry-run."""
+        if self.dry_run:
+            return
+        try:
+            self._sftp.remove(remote_path)
+        except IOError:
+            pass
+
+    def read_text(self, remote_path: str) -> str | None:
+        """Read a small remote text file (e.g. a ledger). None if missing."""
+        if self.dry_run:
+            return None
+        try:
+            with self._sftp.open(remote_path, "r") as fh:
+                data = fh.read()
+        except IOError:
+            return None
+        return data.decode("utf-8") if isinstance(data, bytes) else data
+
+    def write_text(self, remote_path: str, text: str) -> None:
+        """Write a small remote text file, creating parent dirs."""
+        parent = posixpath.dirname(remote_path)
+        if parent:
+            self.makedirs(parent)
+        if self.dry_run:
+            return
+        with self._sftp.open(remote_path, "w") as fh:
+            fh.write(text.encode("utf-8"))
 
     def upload(self, local_path: str, remote_path: str) -> None:
         """Upload a file, creating parents and preserving mtime (clean diffs)."""

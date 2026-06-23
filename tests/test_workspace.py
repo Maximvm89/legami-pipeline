@@ -180,6 +180,72 @@ def test_local_total_all(tmp_path):
     assert total == 150
 
 
+class FakeLedgerSFTP:
+    """In-memory fake supporting listdir / read_text / write_text for ledgers."""
+    def __init__(self):
+        self.files = {}  # path -> text
+
+    def listdir(self, d):
+        prefix = d.rstrip("/") + "/"
+        out, seen = [], set()
+        for p in self.files:
+            if p.startswith(prefix):
+                name = p[len(prefix):].split("/")[0]
+                if name in seen:
+                    continue
+                seen.add(name)
+                out.append({"name": name, "is_dir": "/" in p[len(prefix):],
+                            "size": 0, "mtime": 0, "owner": ""})
+        return out
+
+    def read_text(self, p):
+        return self.files.get(p)
+
+    def write_text(self, p, t):
+        self.files[p] = t
+
+
+def test_ledger_record_and_load():
+    s = FakeLedgerSFTP()
+    core.record_uploads(s, "/r", "marco", ["a/work/x.blend", "a/work/y.blend"])
+    core.record_uploads(s, "/r", "anna", ["a/work/z.blend"])
+    led = core.load_ledgers(s, "/r")
+    assert led["a/work/x.blend"][0] == "marco"
+    assert led["a/work/y.blend"][0] == "marco"
+    assert led["a/work/z.blend"][0] == "anna"
+
+
+def test_ledger_latest_uploader_wins():
+    s = FakeLedgerSFTP()
+    core.record_uploads(s, "/r", "marco", ["shared.blend"])
+    time.sleep(0.01)
+    core.record_uploads(s, "/r", "anna", ["shared.blend"])
+    led = core.load_ledgers(s, "/r")
+    assert led["shared.blend"][0] == "anna"  # most recent upload
+
+
+def test_uploader_for_ledger_then_owner():
+    n = core.TreeNode(name="x", rel="a/x", is_dir=False, owner="serveruser")
+    assert core.uploader_for(n, {"a/x": ("marco", 1.0)}) == "marco"  # ledger wins
+    assert core.uploader_for(n, {}) == "serveruser"                  # owner fallback
+    d = core.TreeNode(name="a", rel="a", is_dir=True, owner="x")
+    assert core.uploader_for(d, {}) == ""                            # dirs: blank
+
+
+def test_build_tree_excludes_uploads_and_sets_owner(tmp_path):
+    now = time.time()
+    entries = [
+        _dir("02_pipeline"), _dir("02_pipeline/.uploads"),
+        {"rel": "02_pipeline/.uploads/marco.json", "is_dir": False,
+         "size": 10, "mtime": now, "owner": "marco"},
+        {"rel": "a.blend", "is_dir": False, "size": 5, "mtime": now, "owner": "anna"},
+    ]
+    root = core.build_merged_tree(FakeSFTP(entries), "/r", str(tmp_path))
+    assert "a.blend" in root.children
+    assert root.children["a.blend"].owner == "anna"          # owner captured
+    assert ".uploads" not in root.children["02_pipeline"].children  # ledger hidden
+
+
 def test_set_local_root_preserves_comments(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(

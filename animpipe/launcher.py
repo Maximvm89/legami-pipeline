@@ -84,12 +84,15 @@ def sync_pipeline_config(cfg: ProjectConfig, creds: SFTPCredentials,
 
 
 def launch(cfg: ProjectConfig, creds: SFTPCredentials, extra_args: list[str] | None = None,
-           dry_run: bool = False, no_sync: bool = False) -> int:
+           dry_run: bool = False, no_sync: bool = False,
+           extra_env: dict | None = None) -> int:
     local_root = cfg.resolved_local_root()
     if not no_sync:
         local_root = sync_pipeline_config(cfg, creds, dry_run=dry_run)
 
     env = os.environ.copy()
+    if extra_env:
+        env.update({k: str(v) for k, v in extra_env.items()})
     ocio = _resolve_ocio(local_root)
     if ocio:
         env["BLENDER_OCIO"] = ocio
