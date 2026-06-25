@@ -151,21 +151,19 @@ class MainWindow(QMainWindow):
         self.lbl_project = QLabel("—")
         grid.addWidget(QLabel("Project:"), 0, 0)
         grid.addWidget(self.lbl_project, 0, 1, 1, 3)
-        grid.addWidget(QLabel("Signed in as:"), 4, 0)
+        grid.addWidget(QLabel("Signed in as:"), 2, 0)
         self.lbl_user = QLabel("—")
         self.lbl_user.setStyleSheet("font-weight:600;")
-        grid.addWidget(self.lbl_user, 4, 1, 1, 3)
+        grid.addWidget(self.lbl_user, 2, 1, 1, 2)
+        self.b_signin = QPushButton("Sign in…")
+        self.b_signin.clicked.connect(self._sign_in)
+        grid.addWidget(self.b_signin, 2, 3)
         grid.addWidget(QLabel("Local folder:"), 1, 0)
         self.ed_local = QLineEdit()
         grid.addWidget(self.ed_local, 1, 1, 1, 2)
         b_local = QPushButton("Browse…")
         b_local.clicked.connect(self._pick_local)
         grid.addWidget(b_local, 1, 3)
-        grid.addWidget(QLabel("FTP password:"), 2, 0)
-        self.ed_pass = QLineEdit()
-        self.ed_pass.setEchoMode(QLineEdit.Password)
-        self.ed_pass.setPlaceholderText("(from .env if blank)")
-        grid.addWidget(self.ed_pass, 2, 1, 1, 2)
         outer.addWidget(box)
 
         self.tabs = QTabWidget()
@@ -322,17 +320,60 @@ class MainWindow(QMainWindow):
         self.lbl_project.setText(f"{self.cfg.name} [{self.cfg.code}]  →  {self.cfg.remote_root}")
         if not self.ed_local.text().strip():
             self.ed_local.setText(self.cfg.resolved_local_root())
+        self._refresh_user_label()
+        # Preconfigured bundle, first run: prompt the artist to sign in once.
+        if self.cfg.sftp_host and not SFTPCredentials.signed_in():
+            QTimer.singleShot(200, self._sign_in)
+
+    def _refresh_user_label(self):
         try:
             self.lbl_user.setText(SFTPCredentials.from_env(".env").user)
+            self.b_signin.setText("Switch user…")
         except Exception:  # noqa: BLE001
-            self.lbl_user.setText("(set your login in .env)")
+            self.lbl_user.setText("(not signed in)")
+            self.b_signin.setText("Sign in…")
+
+    def _sign_in(self):
+        """Collect the artist's SFTP login and save it (no file editing). The host
+        is the show's server, preconfigured in config.yaml."""
+        host = (self.cfg.sftp_host if getattr(self, "cfg", None) else None)
+        port = (self.cfg.sftp_port if getattr(self, "cfg", None) else 22)
+        if not host:
+            QMessageBox.warning(self, "No server configured",
+                                "This build has no SFTP host in config.yaml. Ask "
+                                "your pipeline TD for a preconfigured bundle.")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Sign in")
+        form = QFormLayout(dlg)
+        form.addRow("Server:", QLabel(f"{host}:{port}"))
+        ed_user = QLineEdit()
+        try:
+            ed_user.setText(SFTPCredentials.from_env(".env").user)
+        except Exception:  # noqa: BLE001
+            pass
+        ed_pw = QLineEdit()
+        ed_pw.setEchoMode(QLineEdit.Password)
+        form.addRow("Username:", ed_user)
+        form.addRow("Password:", ed_pw)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        user = ed_user.text().strip()
+        if not user:
+            QMessageBox.warning(self, "Sign in", "Username is required.")
+            return
+        creds = SFTPCredentials(host=host, port=port, user=user,
+                                password=ed_pw.text() or None)
+        creds.save_user()
+        self._refresh_user_label()
+        self.status.showMessage(f"Signed in as {user}.")
 
     def _creds(self) -> SFTPCredentials:
-        creds = SFTPCredentials.from_env(".env")
-        pw = self.ed_pass.text().strip()
-        if pw:
-            creds.password = pw
-        return creds
+        return SFTPCredentials.from_env(".env")
 
     # ---- job runners --------------------------------------------------------
     def _spawn(self, fn, on_done, busy_msg="Working…"):

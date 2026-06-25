@@ -19,6 +19,13 @@ except ImportError:  # dotenv is optional; env vars still work without it.
     load_dotenv = None
 
 
+# Per-user credentials live outside the project so artists sign in once (via the
+# Workspace app) and never edit a file. Both the GUI and the toolkit the Blender
+# add-on shells out to read from here, so a publish/turntable from Blender uses
+# the same saved login.
+USER_CRED_FILE = os.path.join(os.path.expanduser("~"), ".legami", "credentials.env")
+
+
 @dataclass
 class SFTPCredentials:
     host: str
@@ -30,15 +37,20 @@ class SFTPCredentials:
 
     @classmethod
     def from_env(cls, env_file: str | os.PathLike | None = ".env") -> "SFTPCredentials":
-        if load_dotenv is not None and env_file and Path(env_file).exists():
-            load_dotenv(env_file)
+        # Precedence: already-exported env vars > project .env (devs) > the
+        # per-user credentials the app saved (artists).
+        if load_dotenv is not None:
+            if env_file and Path(env_file).exists():
+                load_dotenv(env_file)
+            if os.path.exists(USER_CRED_FILE):
+                load_dotenv(USER_CRED_FILE)
 
         host = os.environ.get("SFTP_HOST")
         user = os.environ.get("SFTP_USER")
         if not host or not user:
             raise ValueError(
-                "SFTP_HOST and SFTP_USER must be set (in the environment or .env). "
-                "See .env.example."
+                "Not signed in. Open the Workspace app and sign in, or set "
+                "SFTP_HOST and SFTP_USER (in the environment or .env)."
             )
 
         return cls(
@@ -49,6 +61,34 @@ class SFTPCredentials:
             key_file=os.environ.get("SFTP_KEY_FILE") or None,
             key_passphrase=os.environ.get("SFTP_KEY_PASSPHRASE") or None,
         )
+
+    def save_user(self) -> str:
+        """Persist this login to the per-user credentials file (read by both the
+        app and the toolkit). Returns the path written."""
+        os.makedirs(os.path.dirname(USER_CRED_FILE), exist_ok=True)
+        lines = [
+            f"SFTP_HOST={self.host}",
+            f"SFTP_PORT={self.port}",
+            f"SFTP_USER={self.user}",
+            f"SFTP_PASSWORD={self.password or ''}",
+        ]
+        with open(USER_CRED_FILE, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        try:
+            os.chmod(USER_CRED_FILE, 0o600)  # best-effort: keep it user-only
+        except OSError:
+            pass
+        # Reflect immediately in this process so a subsequent from_env sees it.
+        os.environ.update({"SFTP_HOST": self.host, "SFTP_PORT": str(self.port),
+                           "SFTP_USER": self.user, "SFTP_PASSWORD": self.password or ""})
+        return USER_CRED_FILE
+
+    @classmethod
+    def signed_in(cls) -> bool:
+        """True if a saved login is available (file or already-set env)."""
+        if os.environ.get("SFTP_HOST") and os.environ.get("SFTP_USER"):
+            return True
+        return os.path.exists(USER_CRED_FILE)
 
 
 @dataclass
@@ -62,6 +102,8 @@ class ProjectConfig:
     local_root: str | None = None      # where the project is synced on this machine
     blender_path: str | None = None    # explicit Blender executable (optional)
     naming: dict = None                # naming-convention regex overrides
+    sftp_host: str | None = None       # show SFTP server (so the bundle preconfigures it)
+    sftp_port: int = 22
 
     def resolved_local_root(self) -> str:
         """Local project folder, defaulting to ~/Legami/<CODE> if not set."""
@@ -91,6 +133,7 @@ class ProjectConfig:
             schema = yaml.safe_load(fh) or {}
 
         tools = raw.get("tools") or {}
+        sftp = raw.get("sftp") or {}
         return cls(
             name=project["name"],
             code=project["code"],
@@ -101,4 +144,6 @@ class ProjectConfig:
             local_root=project.get("local_root"),
             blender_path=tools.get("blender_path"),
             naming=raw.get("naming") or {},
+            sftp_host=sftp.get("host"),
+            sftp_port=int(sftp.get("port", 22)),
         )
