@@ -8,6 +8,17 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+
+
+def _bundled_path(name: str) -> str:
+    """Path to a file shipped alongside this module. When frozen by PyInstaller
+    the source isn't on disk, so resolve under the bundle's animpipe/ data dir;
+    otherwise resolve next to this file."""
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, "animpipe", name)
+    return os.path.join(os.path.dirname(__file__), name)
+
 
 DEFAULTS = {
     "engine": "EEVEE",
@@ -179,7 +190,7 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
         env["LEGAMI_TT_GROUND"] = str(settings.get("template_ground", ""))
         env["LEGAMI_TT_LOCATOR"] = locator
 
-    script = os.path.join(os.path.dirname(__file__), "blender_turntable.py")
+    script = _bundled_path("blender_turntable.py")
     print(f"Rendering turntable frames ({'template' if template_rel else 'auto'})…")
     subprocess.run([blender, "--background", blend_to_open, "--python", script],
                    env=env, check=True)

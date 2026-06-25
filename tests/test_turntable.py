@@ -18,6 +18,20 @@ def test_turntable_settings_defaults_and_override():
     assert s2["resolution_x"] == 1280  # untouched default preserved
 
 
+def test_bundled_path_source_vs_frozen(monkeypatch):
+    # From source: next to the module.
+    monkeypatch.delattr(turntable.sys, "frozen", raising=False)
+    p = turntable._bundled_path("blender_turntable.py")
+    assert p.endswith("blender_turntable.py")
+    assert "animpipe" in p and p == \
+        str(Path(turntable.__file__).parent / "blender_turntable.py")
+    # Frozen: under the PyInstaller bundle's animpipe/ data dir.
+    monkeypatch.setattr(turntable.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(turntable.sys, "_MEIPASS", "/bundle", raising=False)
+    assert turntable._bundled_path("blender_turntable.py") == \
+        "/bundle/animpipe/blender_turntable.py".replace("/", __import__("os").sep)
+
+
 def test_dailies_rel():
     asset = tasks.new_task("asset", "characters/panda", "model")
     shot = tasks.new_task("shot", "SEQ010/SH0010", "animation")

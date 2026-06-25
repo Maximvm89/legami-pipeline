@@ -23,15 +23,29 @@ def _pref_local_root():
     return getattr(p, "local_root", None) if p else None
 
 
-def _shell_toolkit(args, report):
-    """Run an animpipe CLI command via the toolkit the launcher exposed."""
+def _toolkit_cmd(args):
+    """Build the argv to invoke the animpipe toolkit, or None if unavailable.
+
+    From source the launcher sets MODULE=animpipe and PY=python, so we run
+    `python -m animpipe …`. When frozen, PY is animpipe.exe and MODULE is empty,
+    so we call the executable directly."""
     py = os.environ.get("LEGAMI_TOOLKIT_PY")
     td = os.environ.get("LEGAMI_TOOLKIT_DIR")
     if not py or not td:
+        return None, None
+    mod = os.environ.get("LEGAMI_TOOLKIT_MODULE", "animpipe")
+    prefix = [py] + (["-m", mod] if mod else [])
+    return prefix + list(args), td
+
+
+def _shell_toolkit(args, report):
+    """Run an animpipe CLI command via the toolkit the launcher exposed."""
+    cmd, td = _toolkit_cmd(args)
+    if cmd is None:
         report({"ERROR"}, "Toolkit not available — launch from the Workspace app.")
         return False
     try:
-        subprocess.check_call([py, "-m", "animpipe"] + args, cwd=td)
+        subprocess.check_call(cmd, cwd=td)
         return True
     except Exception as exc:  # noqa: BLE001
         report({"ERROR"}, f"Command failed: {exc}")
@@ -456,20 +470,18 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         if _export_fbx(fbx_path, use_selection=use_sel):
             files.append(fbx_path)
 
-        py = os.environ.get("LEGAMI_TOOLKIT_PY")
-        td = os.environ.get("LEGAMI_TOOLKIT_DIR")
-        if not py or not td:
+        pub_cmd, td = _toolkit_cmd(
+            ["publish", "--local", *files, "--task", task["id"],
+             "--status", "review",
+             "--description", context.window_manager.legami_publish_desc])
+        if pub_cmd is None:
             self.report({"WARNING"},
                         f"Saved {len(files)} file(s) to publish/, but the toolkit "
                         f"wasn't found to upload — push via the Workspace app.")
             return {"FINISHED"}
 
-        desc = context.window_manager.legami_publish_desc
         try:
-            subprocess.check_call(
-                [py, "-m", "animpipe", "publish", "--local", *files,
-                 "--task", task["id"], "--status", "review",
-                 "--description", desc], cwd=td)
+            subprocess.check_call(pub_cmd, cwd=td)
         except Exception as exc:  # noqa: BLE001
             self.report({"ERROR"}, f"Saved locally but upload failed: {exc}")
             return {"CANCELLED"}
@@ -481,9 +493,9 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         if (task.get("step") == "model"
                 and context.window_manager.legami_render_turntable):
             try:
-                subprocess.Popen(
-                    [py, "-m", "animpipe", "turntable", "--model", pub_path,
-                     "--task", task["id"]], cwd=td)
+                tt_cmd, _ = _toolkit_cmd(
+                    ["turntable", "--model", pub_path, "--task", task["id"]])
+                subprocess.Popen(tt_cmd, cwd=td)
                 tt_msg = " Turntable rendering in background → dailies."
             except Exception as exc:  # noqa: BLE001
                 print("[Legami] could not start turntable:", exc)

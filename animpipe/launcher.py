@@ -103,8 +103,17 @@ def launch(cfg: ProjectConfig, creds: SFTPCredentials, extra_args: list[str] | N
 
     # Pass the project root to the addon so it can find project_settings.json.
     env["LEGAMI_PROJECT_ROOT"] = local_root
-    # Let the addon shell back to this toolkit (for publish uploads).
-    env["LEGAMI_TOOLKIT_PY"] = sys.executable
+    # Let the addon shell back to this toolkit (for publish uploads + turntables).
+    # From source we invoke `python -m animpipe …`; once frozen there is no
+    # interpreter, so point at the sibling animpipe executable and call it
+    # directly (the addon drops the `-m animpipe` prefix when MODULE is empty).
+    if getattr(sys, "frozen", False):
+        exe_name = "animpipe.exe" if os.name == "nt" else "animpipe"
+        env["LEGAMI_TOOLKIT_PY"] = os.path.join(os.path.dirname(sys.executable), exe_name)
+        env["LEGAMI_TOOLKIT_MODULE"] = ""
+    else:
+        env["LEGAMI_TOOLKIT_PY"] = sys.executable
+        env["LEGAMI_TOOLKIT_MODULE"] = "animpipe"
     env["LEGAMI_TOOLKIT_DIR"] = os.getcwd()
     # Folder containing the legami_pipeline package, for auto-load on launch.
     addon_dir = os.path.join(os.getcwd(), "blender_addon")
