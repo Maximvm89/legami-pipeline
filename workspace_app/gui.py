@@ -88,7 +88,8 @@ class Job(QThread):
 class MainWindow(QMainWindow):
     def __init__(self, config_path="config.yaml"):
         super().__init__()
-        self.setWindowTitle("Legami Workspace")
+        from animpipe.version import get_version
+        self.setWindowTitle(f"Legami Workspace — {get_version()}")
         self.resize(1040, 680)
         self.config_path = config_path
         self.cfg: ProjectConfig | None = None

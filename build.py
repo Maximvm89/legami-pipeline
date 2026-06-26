@@ -38,6 +38,19 @@ def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
+def _version() -> str:
+    """The build version from the git tag (what `git describe` reports), so a
+    release built from tag v0.1.0 stamps 'v0.1.0'. Falls back for untagged trees."""
+    try:
+        out = subprocess.run(["git", "describe", "--tags", "--always", "--dirty"],
+                             cwd=ROOT, capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "0.0.0+dev"
+
+
 def _read_env_value(key: str) -> str:
     """Read a single KEY from the build box's .env (no dotenv dependency)."""
     if os.environ.get(key):
@@ -129,7 +142,13 @@ def main() -> int:
                 shutil.copy2(src, os.path.join(DIST, name))
         print("  no show config.yaml found — shipped config.example.yaml instead")
 
-    print(f"\nBundle ready: {DIST}")
+    # Stamp the version so the frozen app can report it (git isn't available
+    # to a built .exe).
+    version = _version()
+    with open(os.path.join(DIST, "VERSION"), "w", encoding="utf-8") as fh:
+        fh.write(version + "\n")
+
+    print(f"\nBundle ready: {DIST}  (version {version})")
     for exe in sorted(os.listdir(DIST)):
         path = os.path.join(DIST, exe)
         if os.path.isfile(path) and os.access(path, os.X_OK):
@@ -137,7 +156,7 @@ def main() -> int:
 
     if args.zip:
         tag = "windows" if os.name == "nt" else platform.system().lower()
-        archive = os.path.join(ROOT, "dist", f"Legami-{tag}")
+        archive = os.path.join(ROOT, "dist", f"Legami-{tag}-{version}")
         shutil.make_archive(archive, "zip", os.path.join(ROOT, "dist"), "Legami")
         print(f"  zipped: {archive}.zip")
     return 0

@@ -219,6 +219,8 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         description="SFTP folder-structure publisher for a 3D animation pipeline.",
     )
+    from .version import get_version
+    p.add_argument("--version", action="version", version=f"animpipe {get_version()}")
 
     sub = p.add_subparsers(dest="command", required=True)
 
