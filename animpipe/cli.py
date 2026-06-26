@@ -125,24 +125,47 @@ def cmd_put(args) -> int:
     return 0
 
 
+def sanitize_published_config(raw: dict) -> dict:
+    """Strip per-machine fields so a published config doesn't leak one person's
+    paths to every artist (local_root and tools.blender_path)."""
+    (raw.get("project") or {}).pop("local_root", None)
+    raw.pop("tools", None)
+    return raw
+
+
 def cmd_publish_config(args) -> int:
     """Upload the project config to the server so artists' apps download it on
-    sign-in (config.yaml + its folder schema, into 02_pipeline/)."""
+    sign-in (config.yaml + its folder schema, into 02_pipeline/). Machine-specific
+    fields (local_root, tools.blender_path) are stripped so they don't leak to
+    every artist."""
     import os
     import posixpath as _pp
+    import tempfile
+
+    import yaml
 
     cfg = ProjectConfig.load(args.config)
     base = _pp.join(cfg.remote_root, "02_pipeline") + "/"
-    uploads = [(args.config, base + "config.yaml")]
+
+    with open(args.config, encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    raw = sanitize_published_config(raw)
+
+    tmp_dir = tempfile.mkdtemp()
+    clean_cfg = os.path.join(tmp_dir, "config.yaml")
+    with open(clean_cfg, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(raw, fh, sort_keys=False, default_flow_style=False)
+
+    uploads = [(clean_cfg, base + "config.yaml")]
     schema_local = os.path.join(os.path.dirname(os.path.abspath(args.config)),
                                 "folder_schema.yaml")
     if os.path.isfile(schema_local):
         uploads.append((schema_local, base + "folder_schema.yaml"))
 
     for local, remote in uploads:
-        print(f"Upload: {local}\n    -> {remote}")
+        print(f"Upload: {os.path.basename(remote)}\n    -> {remote}")
     if args.dry_run:
-        print("(dry-run: nothing uploaded)")
+        print("(dry-run: nothing uploaded; local_root/tools stripped)")
         return 0
     with _client(args) as client:
         for local, remote in uploads:

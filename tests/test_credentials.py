@@ -87,3 +87,15 @@ def test_remote_config_dir():
     from animpipe.project_sync import remote_config_dir
     assert remote_config_dir("/shared/Legami/") == "/shared/Legami/02_pipeline"
     assert remote_config_dir("/shared/Legami") == "/shared/Legami/02_pipeline"
+
+
+def test_publish_config_strips_machine_fields():
+    from animpipe.cli import sanitize_published_config
+    raw = {"project": {"name": "L", "code": "L", "remote_root": "/r",
+                       "local_root": "/Users/someone/Legami"},
+           "tools": {"blender_path": "/Applications/Blender.app"},
+           "schema": "folder_schema.yaml"}
+    out = sanitize_published_config(raw)
+    assert "local_root" not in out["project"]   # per-machine — must not be published
+    assert "tools" not in out
+    assert out["project"]["remote_root"] == "/r"  # show fields preserved
