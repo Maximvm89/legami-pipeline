@@ -348,6 +348,10 @@ class MainWindow(QMainWindow):
         dl.addWidget(self.review_list, 1)
 
         ops = QHBoxLayout()
+        self.b_review_view = QPushButton("Open Review Sheet")
+        self.b_review_view.setToolTip("Open index.html — all the day's clips in one "
+                                      "page to scrub through.")
+        self.b_review_view.clicked.connect(self._open_review_index)
         self.b_review_open = QPushButton("Open Folder")
         self.b_review_open.setToolTip("Open the review folder in Finder/Explorer to "
                                       "drag clips into SyncSketch.")
@@ -356,11 +360,24 @@ class MainWindow(QMainWindow):
         self.b_review_copy.setToolTip("Copy the selected clip so SyncSketch ▸ MEDIA "
                                       "▸ Upload from ▸ Clipboard can paste it.")
         self.b_review_copy.clicked.connect(self._copy_review_clip)
+        ops.addWidget(self.b_review_view)
         ops.addWidget(self.b_review_open)
         ops.addWidget(self.b_review_copy)
         ops.addStretch(1)
         dl.addLayout(ops)
         return page
+
+    def _open_review_index(self):
+        import webbrowser
+        folder = self._review_local_dir()
+        idx = os.path.join(folder, "index.html") if folder else None
+        if idx and os.path.isfile(idx):
+            webbrowser.open("file://" + idx)
+        else:
+            QMessageBox.information(
+                self, "No review sheet",
+                "No index.html for this date yet — click 'Build / Update Review' "
+                "first (or sync the review folder down).")
 
     def _review_local_dir(self) -> str | None:
         if not self.cfg:
