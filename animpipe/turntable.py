@@ -34,6 +34,7 @@ DEFAULTS = {
     "template_ground": "",     # object to rest the model on (uses its top surface)
     "template_fit": "",        # object whose volume the asset is scaled to fit (framing)
     "template_fit_scale": 1.0, # zoom knob: <1 = pull back/margin, >1 = fill more
+    "stamp": True,             # burn the asset's real size + applied scale into the frames
 }
 
 
@@ -192,6 +193,7 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
         env["LEGAMI_TT_GROUND"] = str(settings.get("template_ground", ""))
         env["LEGAMI_TT_FIT"] = str(settings.get("template_fit", ""))
         env["LEGAMI_TT_FIT_SCALE"] = str(settings.get("template_fit_scale", 1.0))
+        env["LEGAMI_TT_STAMP"] = "1" if settings.get("stamp", True) else "0"
         env["LEGAMI_TT_LOCATOR"] = locator
 
     script = _bundled_path("blender_turntable.py")

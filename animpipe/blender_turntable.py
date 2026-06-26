@@ -99,6 +99,26 @@ def _write_meta(frames_dir, scene):
 _SKIP_TYPES = {"CAMERA", "LIGHT", "LIGHT_PROBE", "SPEAKER"}
 
 
+def _set_scale_stamp(scene, asset, real_size, scale):
+    """Burn the asset's real (un-scaled) size + the applied turntable scale into
+    the render, so reviewers don't read the normalized framing as real size."""
+    r = scene.render
+    for f in ("use_stamp_time", "use_stamp_date", "use_stamp_render_time",
+              "use_stamp_frame", "use_stamp_scene", "use_stamp_camera",
+              "use_stamp_filename", "use_stamp_memory", "use_stamp_hostname",
+              "use_stamp_sequencer_strip", "use_stamp_lens", "use_stamp_marker"):
+        if hasattr(r, f):
+            setattr(r, f, False)
+    r.use_stamp = True
+    r.use_stamp_note = True
+    r.stamp_note_text = (f"{asset}    real {real_size[0]:.2f} x {real_size[1]:.2f} "
+                         f"x {real_size[2]:.2f}    |    turntable scale {scale:.3f}x")
+    try:
+        r.stamp_font_size = 28
+    except (AttributeError, TypeError):
+        pass
+
+
 def _delete_hierarchy(obj):
     for child in list(obj.children):
         _delete_hierarchy(child)
@@ -125,6 +145,8 @@ def run_template_mode():
         fit_scale = float(os.environ.get("LEGAMI_TT_FIT_SCALE") or "1") or 1.0
     except ValueError:
         fit_scale = 1.0
+    do_stamp = os.environ.get("LEGAMI_TT_STAMP", "1") not in ("0", "", "false", "False")
+    asset_name = os.path.splitext(os.path.basename(model or "asset"))[0]
     fit_size = None
     if fit_name:
         ref = bpy.data.objects.get(fit_name)
@@ -225,6 +247,14 @@ def run_template_mode():
                 bpy.context.view_layer.update()
                 print(f"[Legami] scaled asset x{s:.4f} to fit '{fit_name}' "
                       f"(zoom={fit_scale})")
+                print(f"[Legami] asset real size = "
+                      f"{tuple(round(v, 3) for v in msize)} (scene units); the "
+                      f"turntable is normalized, NOT real-scale")
+                if s < 0.5 or s > 2.0:
+                    print(f"[Legami] WARNING: large fit scale {s:.3f}x — check the "
+                          f"asset's real-world units; it may be modeled too big/small.")
+                if do_stamp:
+                    _set_scale_stamp(scene, asset_name, msize, s)
         # Rest height: top surface of the ground object (e.g. the pedestal) if
         # given, otherwise the socket's own Z.
         rest_z = target.z
