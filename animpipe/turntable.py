@@ -32,6 +32,8 @@ DEFAULTS = {
     "template_control": "",    # name of the empty/control to parent the model under
     "template_remove": [],     # object names to delete from the template (placeholders)
     "template_ground": "",     # object to rest the model on (uses its top surface)
+    "template_fit": "",        # object whose volume the asset is scaled to fit (framing)
+    "template_fit_scale": 1.0, # zoom knob: <1 = pull back/margin, >1 = fill more
 }
 
 
@@ -188,6 +190,8 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
         env["LEGAMI_TT_CONTROL"] = str(settings.get("template_control", ""))
         env["LEGAMI_TT_REMOVE"] = "||".join(settings.get("template_remove") or [])
         env["LEGAMI_TT_GROUND"] = str(settings.get("template_ground", ""))
+        env["LEGAMI_TT_FIT"] = str(settings.get("template_fit", ""))
+        env["LEGAMI_TT_FIT_SCALE"] = str(settings.get("template_fit_scale", 1.0))
         env["LEGAMI_TT_LOCATOR"] = locator
 
     script = _bundled_path("blender_turntable.py")

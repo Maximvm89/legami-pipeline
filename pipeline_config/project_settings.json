@@ -53,7 +53,9 @@
     "template": "dev/TurnTableTemplate.blend",
     "template_control": "ASSET_SOCKET",
     "template_remove": ["Showcase Asset"],
-    "template_ground": "Pedestal"
+    "template_ground": "Pedestal",
+    "template_fit": "Showcase Asset",
+    "template_fit_scale": 0.9
   },
   "publish": {
     "locator": "PUBLISH"

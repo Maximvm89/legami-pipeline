@@ -116,6 +116,32 @@ def run_template_mode():
     control_name = os.environ.get("LEGAMI_TT_CONTROL", "")
     remove_names = [n for n in os.environ.get("LEGAMI_TT_REMOVE", "").split("||") if n]
 
+    # Framing: scale the incoming asset to fit a reference object's volume (the
+    # showcase placeholder the camera was composed around), times a zoom knob.
+    # fit_scale < 1 zooms out (more margin), > 1 zooms in. Measure the reference
+    # BEFORE it gets removed below.
+    fit_name = os.environ.get("LEGAMI_TT_FIT", "")
+    try:
+        fit_scale = float(os.environ.get("LEGAMI_TT_FIT_SCALE") or "1") or 1.0
+    except ValueError:
+        fit_scale = 1.0
+    fit_size = None
+    if fit_name:
+        ref = bpy.data.objects.get(fit_name)
+        if ref:
+            rmn = [1e18, 1e18, 1e18]
+            rmx = [-1e18, -1e18, -1e18]
+            for corner in ref.bound_box:
+                w = ref.matrix_world @ mathutils.Vector(corner)
+                for i in range(3):
+                    rmn[i] = min(rmn[i], w[i])
+                    rmx[i] = max(rmx[i], w[i])
+            fit_size = [rmx[i] - rmn[i] for i in range(3)]
+            print(f"[Legami] fit reference '{fit_name}' size="
+                  f"{tuple(round(s, 3) for s in fit_size)}")
+        else:
+            print(f"[Legami] fit reference '{fit_name}' not found; no scaling")
+
     for nm in remove_names:
         ob = bpy.data.objects.get(nm)
         if ob:
@@ -185,6 +211,20 @@ def run_template_mode():
             obj.parent = ctrl
             obj.matrix_parent_inverse = ident
         bpy.context.view_layer.update()
+        # Scale the asset to fit the reference volume (tightest axis fits inside),
+        # then apply the zoom knob. Seating below re-measures and re-centers.
+        mesh_now = [o for o in linked if o.type == "MESH"]
+        if fit_size and mesh_now:
+            mn, mx = _world_bbox(mesh_now)
+            msize = [mx[i] - mn[i] for i in range(3)]
+            ratios = [fit_size[i] / msize[i] for i in range(3) if msize[i] > 1e-6]
+            if ratios:
+                s = min(ratios) * fit_scale
+                for obj in roots:
+                    obj.scale = obj.scale * s
+                bpy.context.view_layer.update()
+                print(f"[Legami] scaled asset x{s:.4f} to fit '{fit_name}' "
+                      f"(zoom={fit_scale})")
         # Rest height: top surface of the ground object (e.g. the pedestal) if
         # given, otherwise the socket's own Z.
         rest_z = target.z
