@@ -35,9 +35,10 @@ def copy(text: str) -> bool:
 
 
 def copy_file(path: str) -> bool:
-    """Put an actual file on the clipboard (as ⌘C on a file in Finder does), so an
-    app's 'paste / upload from clipboard' grabs the file itself. macOS + Windows;
-    returns False elsewhere (no reliable file-clipboard on bare Linux)."""
+    """Put a single file on the clipboard (as ⌘C on a file in Finder does), so an
+    app's 'upload from clipboard' grabs the file itself. macOS + Windows; returns
+    False elsewhere. (Multi-file clipboard isn't reliable across OSes — open the
+    folder and drag instead.)"""
     path = os.path.abspath(path)
     if not os.path.isfile(path):
         return False

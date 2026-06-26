@@ -504,13 +504,13 @@ def cmd_review_copy(args) -> int:
         return 1
     names = [os.path.basename(c) for c in clips]
 
-    if args.open:
-        clipboard.reveal(review_local)
     if args.list:
         for i, n in enumerate(names, 1):
             print(f"  {i}. {n}")
         return 0
 
+    # Single-clip clipboard copy (for SyncSketch ▸ MEDIA ▸ Upload from ▸ Clipboard),
+    # which is the one case the OS file-clipboard handles reliably.
     chosen = None
     if args.clip:
         matches = [c for c, n in zip(clips, names) if args.clip in n]
@@ -523,25 +523,23 @@ def cmd_review_copy(args) -> int:
             print(f"Index out of range (1..{len(clips)}).")
             return 1
         chosen = clips[args.index - 1]
-    elif len(clips) == 1:
-        chosen = clips[0]
-    else:
-        for i, n in enumerate(names, 1):
-            print(f"  {i}. {n}")
-        try:
-            sel = input(f"Copy which clip? [1-{len(clips)}]: ").strip()
-            chosen = clips[int(sel) - 1]
-        except (ValueError, IndexError, EOFError):
-            print("Nothing copied.")
-            return 1
 
-    if clipboard.copy_file(chosen):
-        print(f"Copied to clipboard: {os.path.basename(chosen)}\n"
-              f"In SyncSketch: MEDIA ▸ Upload from ▸ Clipboard, then paste.")
-        return 0
-    print("Could not copy the file to the clipboard on this platform.\n"
-          f"Open the folder and ⌘C the file yourself:\n  {review_local}")
-    return 1
+    if chosen is not None:
+        if clipboard.copy_file(chosen):
+            print(f"Copied to clipboard: {os.path.basename(chosen)}\n"
+                  f"In SyncSketch: MEDIA ▸ Upload from ▸ Clipboard, then paste.")
+            return 0
+        print("Could not copy to the clipboard; opening the folder instead.")
+
+    # Default (and the "all" case): open the folder so you can drag the clips
+    # straight into SyncSketch (multi-file clipboard isn't reliable across OSes).
+    print(f"{len(clips)} clip(s) in this review:")
+    for n in names:
+        print(f"  {n}")
+    clipboard.reveal(review_local)
+    print(f"\nOpened {review_local}\n"
+          "Drag the clips into SyncSketch (MEDIA ▸ Your Computer, or drop them in).")
+    return 0
 
 
 def _load_project_settings_for(cfg) -> dict:
@@ -684,13 +682,13 @@ def build_parser() -> argparse.ArgumentParser:
     rr.set_defaults(func=cmd_reset_review)
 
     rc = sub.add_parser("review-copy", parents=[common],
-                        help="copy a review video to the clipboard for SyncSketch")
+                        help="open the review folder (or copy one clip to clipboard)")
     rc.add_argument("--date", default="", help="review date (default: today)")
-    rc.add_argument("--index", type=int, default=0, help="clip number (see --list)")
-    rc.add_argument("--clip", default="", help="match clip by filename substring")
+    rc.add_argument("--index", type=int, default=0,
+                    help="copy this clip number to the clipboard (see --list)")
+    rc.add_argument("--clip", default="",
+                    help="copy the clip matching this filename substring")
     rc.add_argument("--list", action="store_true", help="just list the clips")
-    rc.add_argument("--open", action="store_true",
-                    help="also reveal the folder in Finder/Explorer")
     rc.set_defaults(func=cmd_review_copy)
 
     return p
