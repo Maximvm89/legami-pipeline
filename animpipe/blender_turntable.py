@@ -16,6 +16,10 @@ import os
 import bpy
 import mathutils
 
+# Preview mode: set up the framing but don't render or quit, so the artist can
+# look through the turntable camera interactively and dial in the scale.
+_PREVIEW = os.environ.get("LEGAMI_TT_PREVIEW", "0") not in ("0", "", "false", "False")
+
 
 def _bbox_center_size():
     objs = [o for o in bpy.context.scene.objects if o.type == "MESH"]
@@ -119,6 +123,29 @@ def _set_scale_stamp(scene, asset, real_size, scale):
         pass
 
 
+def _preview_setup(scene):
+    """Interactive preview: look through the turntable camera with materials shown,
+    no render. The artist eyeballs the framing and tweaks template_fit_scale."""
+    try:
+        scene.frame_set(scene.frame_start)
+    except Exception:  # noqa: BLE001
+        pass
+    for win in bpy.context.window_manager.windows:
+        for area in win.screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            for sp in area.spaces:
+                if sp.type == "VIEW_3D":
+                    try:
+                        sp.region_3d.view_perspective = "CAMERA"
+                        sp.shading.type = "MATERIAL"
+                    except Exception:  # noqa: BLE001
+                        pass
+    print("[Legami] PREVIEW — looking through the turntable camera. Adjust "
+          "'template_fit_scale' (and 'template_fit_mode') and re-run; close "
+          "Blender when done.")
+
+
 def _delete_hierarchy(obj):
     for child in list(obj.children):
         _delete_hierarchy(child)
@@ -145,6 +172,7 @@ def run_template_mode():
         fit_scale = float(os.environ.get("LEGAMI_TT_FIT_SCALE") or "1") or 1.0
     except ValueError:
         fit_scale = 1.0
+    fit_mode = (os.environ.get("LEGAMI_TT_FIT_MODE", "box") or "box").lower()
     do_stamp = os.environ.get("LEGAMI_TT_STAMP", "1") not in ("0", "", "false", "False")
     asset_name = os.path.splitext(os.path.basename(model or "asset"))[0]
     fit_size = None
@@ -239,9 +267,19 @@ def run_template_mode():
         if fit_size and mesh_now:
             mn, mx = _world_bbox(mesh_now)
             msize = [mx[i] - mn[i] for i in range(3)]
-            ratios = [fit_size[i] / msize[i] for i in range(3) if msize[i] > 1e-6]
-            if ratios:
-                s = min(ratios) * fit_scale
+            # How the asset is sized to the reference volume:
+            #   box   - fit the whole bounding box inside (tightest axis; safe)
+            #   height- fill vertically (Z); good for characters, arms may run wide
+            #   width - fit the widest horizontal extent
+            if fit_mode == "height" and msize[2] > 1e-6:
+                base = fit_size[2] / msize[2]
+            elif fit_mode == "width" and max(msize[0], msize[1]) > 1e-6:
+                base = min(fit_size[0], fit_size[1]) / max(msize[0], msize[1])
+            else:
+                rs = [fit_size[i] / msize[i] for i in range(3) if msize[i] > 1e-6]
+                base = min(rs) if rs else None
+            if base:
+                s = base * fit_scale
                 for obj in roots:
                     obj.scale = obj.scale * s
                 bpy.context.view_layer.update()
@@ -286,6 +324,9 @@ def run_template_mode():
               f"model left at origin")
 
     # Respect the template's color/engine/resolution/animation; only set output.
+    if _PREVIEW:
+        _preview_setup(scene)
+        return
     frames_dir = _png_output(scene)
     bpy.ops.render.render(animation=True)
     _write_meta(frames_dir, scene)
@@ -370,6 +411,9 @@ def build_and_render():
     # Render a PNG sequence; the toolkit encodes the MP4 afterwards (this build
     # of Blender may lack FFmpeg, so we never rely on Blender for video).
     _apply_view(scene)
+    if _PREVIEW:
+        _preview_setup(scene)
+        return
     frames_dir = _png_output(scene)
     bpy.ops.render.render(animation=True)
     _write_meta(frames_dir, scene)
@@ -382,4 +426,5 @@ try:
     else:
         build_and_render()
 finally:
-    bpy.ops.wm.quit_blender()
+    if not _PREVIEW:
+        bpy.ops.wm.quit_blender()

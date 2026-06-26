@@ -34,6 +34,7 @@ DEFAULTS = {
     "template_ground": "",     # object to rest the model on (uses its top surface)
     "template_fit": "",        # object whose volume the asset is scaled to fit (framing)
     "template_fit_scale": 1.0, # zoom knob: <1 = pull back/margin, >1 = fill more
+    "template_fit_mode": "box",# box (whole bbox) | height (fill vertically) | width
     "stamp": True,             # burn the asset's real size + applied scale into the frames
 }
 
@@ -122,8 +123,10 @@ def _load_project_settings(local_root: str) -> dict:
 
 
 def run_turntable(cfg, creds, model_path: str, task_id: str,
-                  dry_run: bool = False) -> int:
-    """Render a turntable from model_path and publish it to 07_dailies."""
+                  dry_run: bool = False, preview: bool = False) -> int:
+    """Render a turntable from model_path and publish it to 07_dailies. With
+    preview=True, open Blender interactively through the turntable camera (no
+    render, no publish) so framing/scale can be dialed in."""
     from .sftp import SFTPClient
     from . import tasks
     from .launcher import find_blender, _resolve_ocio
@@ -131,9 +134,10 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
     local_root = cfg.resolved_local_root()
     version_label = os.path.splitext(os.path.basename(model_path))[0]  # panda_model_v003
 
+    need_task = not dry_run and not preview  # preview doesn't touch the task/server
     with SFTPClient(creds, dry_run=dry_run) as client:
-        task = tasks.get_task(client, cfg.remote_root, task_id) if not dry_run else None
-    if not dry_run and not task:
+        task = tasks.get_task(client, cfg.remote_root, task_id) if need_task else None
+    if need_task and not task:
         print(f"error: task not found: {task_id}")
         return 1
 
@@ -193,10 +197,21 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
         env["LEGAMI_TT_GROUND"] = str(settings.get("template_ground", ""))
         env["LEGAMI_TT_FIT"] = str(settings.get("template_fit", ""))
         env["LEGAMI_TT_FIT_SCALE"] = str(settings.get("template_fit_scale", 1.0))
+        env["LEGAMI_TT_FIT_MODE"] = str(settings.get("template_fit_mode", "box"))
         env["LEGAMI_TT_STAMP"] = "1" if settings.get("stamp", True) else "0"
         env["LEGAMI_TT_LOCATOR"] = locator
 
     script = _bundled_path("blender_turntable.py")
+    if preview:
+        # Interactive: launch Blender with a window (no --background), set up the
+        # framing, and leave it open. Blocks until the artist closes Blender.
+        env["LEGAMI_TT_PREVIEW"] = "1"
+        print("Opening turntable preview — look through the camera; close Blender "
+              "when done. Tweak template_fit_scale / template_fit_mode to adjust.")
+        subprocess.run([blender, blend_to_open, "--python", script],
+                       env=env, check=True)
+        return 0
+
     print(f"Rendering turntable frames ({'template' if template_rel else 'auto'})…")
     subprocess.run([blender, "--background", blend_to_open, "--python", script],
                    env=env, check=True)

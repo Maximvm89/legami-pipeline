@@ -249,7 +249,7 @@ def cmd_turntable(args) -> int:
     creds = (SFTPCredentials(host="(dry-run)", port=22, user="(dry-run)")
              if args.dry_run else SFTPCredentials.from_env(args.env))
     return turntable.run_turntable(cfg, creds, args.model, args.task,
-                                   dry_run=args.dry_run)
+                                   dry_run=args.dry_run, preview=args.preview)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -344,6 +344,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="render a model turntable and publish it to 07_dailies")
     tt.add_argument("--model", required=True, help="published model .blend to render")
     tt.add_argument("--task", required=True, help="task id")
+    tt.add_argument("--preview", action="store_true",
+                    help="open Blender interactively to preview framing (no render)")
     tt.set_defaults(func=cmd_turntable)
 
     return p

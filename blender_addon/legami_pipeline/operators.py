@@ -507,6 +507,34 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class LEGAMI_OT_preview_turntable(bpy.types.Operator):
+    bl_idname = "legami.preview_turntable"
+    bl_label = "Preview Turntable Framing"
+    bl_description = ("Open the turntable template in a new Blender window through "
+                      "the camera (no render) to check framing — save the file first")
+
+    def execute(self, context):
+        path = bpy.data.filepath
+        if not path:
+            self.report({"ERROR"}, "Save the file first, then preview.")
+            return {"CANCELLED"}
+        if bpy.data.is_dirty:
+            bpy.ops.wm.save_mainfile()
+        task = active_task()
+        tid = task["id"] if task else "preview"
+        cmd, td = _toolkit_cmd(["turntable", "--preview", "--model", path, "--task", tid])
+        if cmd is None:
+            self.report({"ERROR"}, "Toolkit not available — launch from the Workspace app.")
+            return {"CANCELLED"}
+        try:
+            subprocess.Popen(cmd, cwd=td)   # non-blocking: keep working here
+            self.report({"INFO"}, "Opening turntable preview… (close that window when done)")
+        except Exception as exc:  # noqa: BLE001
+            self.report({"ERROR"}, f"Could not start preview: {exc}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
 CLASSES = (
     LEGAMI_OT_apply_project_settings,
     LEGAMI_OT_verify_ocio,
@@ -515,4 +543,5 @@ CLASSES = (
     LEGAMI_OT_save_to_task,
     LEGAMI_OT_check,
     LEGAMI_OT_publish,
+    LEGAMI_OT_preview_turntable,
 )

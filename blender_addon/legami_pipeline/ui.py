@@ -27,6 +27,7 @@ class LEGAMI_MT_menu(bpy.types.Menu):
             layout.separator()
 
         layout.operator("legami.add_publish_locator", icon="EMPTY_AXIS")
+        layout.operator("legami.preview_turntable", icon="CAMERA_DATA")
         layout.separator()
 
         layout.operator("legami.apply_project_settings", icon="CHECKMARK")

@@ -56,6 +56,7 @@
     "template_ground": "Pedestal",
     "template_fit": "Showcase Asset",
     "template_fit_scale": 0.9,
+    "template_fit_mode": "box",
     "stamp": true
   },
   "publish": {
