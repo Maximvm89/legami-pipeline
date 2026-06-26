@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QInputDialog, QMenu,
 )
 
-from animpipe.config import ProjectConfig, SFTPCredentials
+from animpipe.config import ProjectConfig, SFTPCredentials, CACHED_CONFIG
 from animpipe.sftp import SFTPClient
 from animpipe import tasks as tasksmod
 from . import core
@@ -309,12 +309,15 @@ class MainWindow(QMainWindow):
 
     # ---- config / creds -----------------------------------------------------
     def _load_config(self):
-        path = self.config_path
-        if not os.path.isfile(path):
-            self.lbl_project.setText("config.yaml not found — File ▸ Open config…")
+        # Dev: a local config.yaml. Artist: the show config the app downloaded from
+        # the server into the cache on sign-in (ProjectConfig.load falls back to it).
+        if not os.path.isfile(self.config_path) and not os.path.isfile(CACHED_CONFIG):
+            self.lbl_project.setText("Not connected — Sign in to load the project.")
+            self._refresh_user_label()
+            QTimer.singleShot(200, self._sign_in)   # generic bundle, first run
             return
         try:
-            self.cfg = ProjectConfig.load(path)
+            self.cfg = ProjectConfig.load(self.config_path)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Config error", str(exc))
             return
@@ -322,39 +325,37 @@ class MainWindow(QMainWindow):
         if not self.ed_local.text().strip():
             self.ed_local.setText(self.cfg.resolved_local_root())
         self._refresh_user_label()
-        # Preconfigured bundle, first run: prompt the artist to sign in once.
-        if self.cfg.sftp_host and not SFTPCredentials.signed_in():
-            QTimer.singleShot(200, self._sign_in)
 
     def _refresh_user_label(self):
         try:
             self.lbl_user.setText(SFTPCredentials.from_env(".env").user)
-            self.b_signin.setText("Switch user…")
+            self.b_signin.setText("Switch user / project…")
         except Exception:  # noqa: BLE001
             self.lbl_user.setText("(not signed in)")
             self.b_signin.setText("Sign in…")
 
     def _sign_in(self):
-        """Collect the artist's SFTP login and save it (no file editing). The host
-        is the show's server, preconfigured in config.yaml."""
-        host = (self.cfg.sftp_host if getattr(self, "cfg", None) else None)
-        port = (self.cfg.sftp_port if getattr(self, "cfg", None) else 22)
-        if not host:
-            QMessageBox.warning(self, "No server configured",
-                                "This build has no SFTP host in config.yaml. Ask "
-                                "your pipeline TD for a preconfigured bundle.")
-            return
+        """Collect server + project root + login, connect, and download the show
+        config from the server. Nothing about the show is baked into the app."""
+        try:
+            saved = SFTPCredentials.from_env(".env")
+        except Exception:  # noqa: BLE001
+            saved = None
         dlg = QDialog(self)
         dlg.setWindowTitle("Sign in")
         form = QFormLayout(dlg)
-        form.addRow("Server:", QLabel(f"{host}:{port}"))
-        ed_user = QLineEdit()
-        try:
-            ed_user.setText(SFTPCredentials.from_env(".env").user)
-        except Exception:  # noqa: BLE001
-            pass
+        ed_host = QLineEdit(saved.host if saved else "")
+        ed_port = QLineEdit(str(saved.port) if saved else "22")
+        ed_root = QLineEdit(saved.remote_root if saved and saved.remote_root else "")
+        ed_root.setPlaceholderText("e.g. /shared/Legami")
+        ed_user = QLineEdit(saved.user if saved else "")
         ed_pw = QLineEdit()
         ed_pw.setEchoMode(QLineEdit.Password)
+        if saved and saved.password:
+            ed_pw.setText(saved.password)
+        form.addRow("Server host:", ed_host)
+        form.addRow("Port:", ed_port)
+        form.addRow("Project root:", ed_root)
         form.addRow("Username:", ed_user)
         form.addRow("Password:", ed_pw)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -363,14 +364,30 @@ class MainWindow(QMainWindow):
         form.addRow(buttons)
         if dlg.exec() != QDialog.Accepted:
             return
-        user = ed_user.text().strip()
-        if not user:
-            QMessageBox.warning(self, "Sign in", "Username is required.")
+        host, root, user = (ed_host.text().strip(), ed_root.text().strip(),
+                            ed_user.text().strip())
+        if not (host and root and user):
+            QMessageBox.warning(self, "Sign in",
+                                "Server host, project root and username are required.")
             return
+        try:
+            port = int(ed_port.text().strip() or "22")
+        except ValueError:
+            port = 22
         creds = SFTPCredentials(host=host, port=port, user=user,
-                                password=ed_pw.text() or None)
+                                password=ed_pw.text() or None, remote_root=root)
+        # Connect + download the show config (this also validates the login).
+        self.status.showMessage("Connecting…")
+        try:
+            from animpipe.project_sync import fetch_project_config
+            fetch_project_config(creds, root)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Sign in failed",
+                                 f"Could not connect or load the project from "
+                                 f"{host}:{root}\n\n{exc}")
+            return
         creds.save_user()
-        self._refresh_user_label()
+        self._load_config()   # now loads the downloaded config from the cache
         self.status.showMessage(f"Signed in as {user}.")
 
     def _creds(self) -> SFTPCredentials:

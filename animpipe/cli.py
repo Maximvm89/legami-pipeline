@@ -125,6 +125,32 @@ def cmd_put(args) -> int:
     return 0
 
 
+def cmd_publish_config(args) -> int:
+    """Upload the project config to the server so artists' apps download it on
+    sign-in (config.yaml + its folder schema, into 02_pipeline/)."""
+    import os
+    import posixpath as _pp
+
+    cfg = ProjectConfig.load(args.config)
+    base = _pp.join(cfg.remote_root, "02_pipeline") + "/"
+    uploads = [(args.config, base + "config.yaml")]
+    schema_local = os.path.join(os.path.dirname(os.path.abspath(args.config)),
+                                "folder_schema.yaml")
+    if os.path.isfile(schema_local):
+        uploads.append((schema_local, base + "folder_schema.yaml"))
+
+    for local, remote in uploads:
+        print(f"Upload: {local}\n    -> {remote}")
+    if args.dry_run:
+        print("(dry-run: nothing uploaded)")
+        return 0
+    with _client(args) as client:
+        for local, remote in uploads:
+            client.upload(local, remote)
+    print("done — artists will pick this up on their next sign-in.")
+    return 0
+
+
 def cmd_sync(args) -> int:
     import posixpath as _pp
     cfg = ProjectConfig.load(args.config)
@@ -251,6 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="remote path (absolute, or relative to remote_root; "
                         "end with / to keep the local filename)")
     u.set_defaults(func=cmd_put)
+
+    pc = sub.add_parser("publish-config", parents=[common],
+                        help="upload config.yaml + folder schema to the server so "
+                             "artists' apps download the project on sign-in")
+    pc.set_defaults(func=cmd_publish_config)
 
     sy = sub.add_parser("sync", parents=[common],
                         help="download a remote folder to local")

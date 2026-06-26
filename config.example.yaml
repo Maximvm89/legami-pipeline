@@ -14,15 +14,11 @@ project:
   # Optional — defaults to ~/Legami/<CODE> if omitted.
   # local_root: "~/Legami/MAF"
 
-# SFTP server for this show (host/port only — NO credentials here). This is
-# baked into the standalone bundle so the artist's Workspace app knows the
-# server and they only enter their own username/password (Sign in…). Per-user
-# logins live in ~/.legami/credentials.env, written by the app — never here.
-sftp:
-  host: "sftp.example.com"
-  port: 22
-
 # Path to the folder schema (relative to this config file, or absolute).
+# Upload this config.yaml + the schema to <remote_root>/02_pipeline/ with
+# `animpipe publish-config`; the Workspace app downloads them on sign-in. The
+# artist enters the server host + project root + login themselves (Sign in…),
+# saved to ~/.legami/credentials.env — never here.
 schema: "folder_schema.yaml"
 
 # Optional: naming-convention rules (regex) used to sanity-check new task names.

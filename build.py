@@ -20,16 +20,14 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist", "Legami")
 
-# Files/dirs copied alongside the executables so the app is self-contained.
-# (Per-user config.yaml/.env are created from these examples on first run.)
+# Files/dirs copied alongside the executables. The bundle is show-agnostic — the
+# artist signs in (host + project root + login) and the app downloads the show
+# config from the server, so nothing project-specific is shipped here.
 SIDE_FILES = [
-    "folder_schema.yaml",
     "README.md",
 ]
 SIDE_DIRS = [
     "blender_addon",     # addon the launcher auto-loads / installs into Blender
-    "color_pipeline",    # pinned OCIO config + color policy
-    "pipeline_config",   # default project_settings.json
 ]
 
 
@@ -51,52 +49,6 @@ def _version() -> str:
     return "0.0.0+dev"
 
 
-def _read_env_value(key: str) -> str:
-    """Read a single KEY from the build box's .env (no dotenv dependency)."""
-    if os.environ.get(key):
-        return os.environ[key]
-    env_path = os.path.join(ROOT, ".env")
-    if os.path.isfile(env_path):
-        with open(env_path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line.startswith(f"{key}=") and "=" in line:
-                    return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return ""
-
-
-def bake_show_config(dist_dir: str) -> bool:
-    """If the build box has a project config, bake a sanitized, preconfigured
-    config.yaml into the bundle (show settings + SFTP host, NO local paths or
-    credentials) so artists download a ready-to-run bundle. Returns True if baked.
-    """
-    import yaml
-    cfg_path = os.path.join(ROOT, "config.yaml")
-    if not os.path.isfile(cfg_path):
-        return False
-    with open(cfg_path, encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
-    project = raw.get("project") or {}
-    if not all(project.get(k) for k in ("name", "code", "remote_root")):
-        return False
-    sftp = raw.get("sftp") or {}
-    host = sftp.get("host") or _read_env_value("SFTP_HOST")
-    port = sftp.get("port") or _read_env_value("SFTP_PORT") or 22
-    lines = [
-        "# Preconfigured for this show by the pipeline TD — do not edit.",
-        "# Your login is entered in the Workspace app (Sign in…), not here.",
-        "project:",
-        f'  name: "{project["name"]}"',
-        f'  code: "{project["code"]}"',
-        f'  remote_root: "{project["remote_root"]}"',
-        "schema: \"folder_schema.yaml\"",
-    ]
-    if host:
-        lines += ["sftp:", f'  host: "{host}"', f"  port: {int(port)}"]
-    lines += ["tools:", "  blender_path: null", ""]
-    with open(os.path.join(dist_dir, "config.yaml"), "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines))
-    return True
 
 
 def main() -> int:
@@ -131,16 +83,6 @@ def main() -> int:
         if os.path.isdir(src):
             shutil.copytree(src, os.path.join(DIST, name), dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns("__pycache__"))
-
-    if bake_show_config(DIST):
-        print("  baked preconfigured config.yaml (show settings + SFTP host)")
-    else:
-        # No show config on this box — ship the examples for a manual setup.
-        for name in ("config.example.yaml", ".env.example"):
-            src = os.path.join(ROOT, name)
-            if os.path.isfile(src):
-                shutil.copy2(src, os.path.join(DIST, name))
-        print("  no show config.yaml found — shipped config.example.yaml instead")
 
     # Stamp the version so the frozen app can report it (git isn't available
     # to a built .exe).

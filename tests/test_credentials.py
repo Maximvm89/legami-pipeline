@@ -60,3 +60,30 @@ def test_project_config_sftp_defaults_when_absent(tmp_path):
                    'schema: "folder_schema.yaml"\n')
     pc = ProjectConfig.load(str(cfg))
     assert pc.sftp_host is None and pc.sftp_port == 22
+
+
+def test_remote_root_roundtrips(tmp_path, monkeypatch):
+    _isolate_cred_file(tmp_path, monkeypatch)
+    SFTPCredentials(host="h", port=22, user="u", password="p",
+                    remote_root="/shared/Legami").save_user()
+    monkeypatch.delenv("LEGAMI_REMOTE_ROOT", raising=False)
+    assert SFTPCredentials.from_env(env_file=None).remote_root == "/shared/Legami"
+
+
+def test_load_falls_back_to_cached_config(tmp_path, monkeypatch):
+    # No local config.yaml, but a cached one the app "downloaded" — load uses it.
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "folder_schema.yaml").write_text("root: {}\n")
+    (cache / "config.yaml").write_text(
+        'project:\n  name: "Cached"\n  code: "CCH"\n  remote_root: "/shared/CCH"\n'
+        'schema: "folder_schema.yaml"\n')
+    monkeypatch.setattr(config, "CACHED_CONFIG", str(cache / "config.yaml"))
+    pc = ProjectConfig.load(str(tmp_path / "does_not_exist.yaml"))
+    assert pc.name == "Cached" and pc.remote_root == "/shared/CCH"
+
+
+def test_remote_config_dir():
+    from animpipe.project_sync import remote_config_dir
+    assert remote_config_dir("/shared/Legami/") == "/shared/Legami/02_pipeline"
+    assert remote_config_dir("/shared/Legami") == "/shared/Legami/02_pipeline"

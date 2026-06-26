@@ -19,11 +19,15 @@ except ImportError:  # dotenv is optional; env vars still work without it.
     load_dotenv = None
 
 
-# Per-user credentials live outside the project so artists sign in once (via the
-# Workspace app) and never edit a file. Both the GUI and the toolkit the Blender
-# add-on shells out to read from here, so a publish/turntable from Blender uses
-# the same saved login.
-USER_CRED_FILE = os.path.join(os.path.expanduser("~"), ".legami", "credentials.env")
+# Everything per-user lives under ~/.legami so artists sign in once (via the
+# Workspace app) and never edit a file: the saved login (credentials.env) and the
+# show config downloaded from the server (cache/). Both the GUI and the toolkit
+# the Blender add-on shells out to read from here, so a publish/turntable from
+# Blender uses the same login and the same cached project config.
+LEGAMI_HOME = os.path.join(os.path.expanduser("~"), ".legami")
+USER_CRED_FILE = os.path.join(LEGAMI_HOME, "credentials.env")
+CACHE_DIR = os.path.join(LEGAMI_HOME, "cache")
+CACHED_CONFIG = os.path.join(CACHE_DIR, "config.yaml")
 
 
 @dataclass
@@ -34,6 +38,7 @@ class SFTPCredentials:
     password: str | None = None
     key_file: str | None = None
     key_passphrase: str | None = None
+    remote_root: str | None = None     # project root entered at sign-in (where config lives)
 
     @classmethod
     def from_env(cls, env_file: str | os.PathLike | None = ".env") -> "SFTPCredentials":
@@ -60,10 +65,11 @@ class SFTPCredentials:
             password=os.environ.get("SFTP_PASSWORD") or None,
             key_file=os.environ.get("SFTP_KEY_FILE") or None,
             key_passphrase=os.environ.get("SFTP_KEY_PASSPHRASE") or None,
+            remote_root=os.environ.get("LEGAMI_REMOTE_ROOT") or None,
         )
 
     def save_user(self) -> str:
-        """Persist this login to the per-user credentials file (read by both the
+        """Persist this login + project root to the per-user file (read by both the
         app and the toolkit). Returns the path written."""
         os.makedirs(os.path.dirname(USER_CRED_FILE), exist_ok=True)
         lines = [
@@ -71,6 +77,7 @@ class SFTPCredentials:
             f"SFTP_PORT={self.port}",
             f"SFTP_USER={self.user}",
             f"SFTP_PASSWORD={self.password or ''}",
+            f"LEGAMI_REMOTE_ROOT={self.remote_root or ''}",
         ]
         with open(USER_CRED_FILE, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
@@ -80,7 +87,8 @@ class SFTPCredentials:
             pass
         # Reflect immediately in this process so a subsequent from_env sees it.
         os.environ.update({"SFTP_HOST": self.host, "SFTP_PORT": str(self.port),
-                           "SFTP_USER": self.user, "SFTP_PASSWORD": self.password or ""})
+                           "SFTP_USER": self.user, "SFTP_PASSWORD": self.password or "",
+                           "LEGAMI_REMOTE_ROOT": self.remote_root or ""})
         return USER_CRED_FILE
 
     @classmethod
@@ -114,6 +122,10 @@ class ProjectConfig:
     @classmethod
     def load(cls, config_path: str | os.PathLike) -> "ProjectConfig":
         config_path = Path(config_path)
+        # Generic bundle / artist machine: no local config.yaml — fall back to the
+        # show config the Workspace app downloaded from the server into the cache.
+        if not config_path.exists() and Path(CACHED_CONFIG).exists():
+            config_path = Path(CACHED_CONFIG)
         with open(config_path) as fh:
             raw = yaml.safe_load(fh) or {}
 
