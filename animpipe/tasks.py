@@ -158,14 +158,18 @@ def publish_task(sftp, remote_root: str, username: str, local_files,
     task = get_task(sftp, remote_root, task_id)
     if not task:
         return None
-    # Hard guarantee: never overwrite an already-published version. If a client
-    # computed a stale version, refuse here (at the server boundary) rather than
-    # silently clobbering the existing publish — the caller re-runs to version up.
-    incoming = {file_version(_os.path.basename(f)) for f in local_files} - {None}
-    clash = sorted(incoming & published_versions(task))
+    # Hard guarantee: never overwrite an already-published FILE. Match by full file
+    # name (base + version), NOT by bare version number — a surface task carries
+    # several looks that version independently, so 'foo_surface_clean_v001.blend'
+    # must not be seen as a clash with 'foo_surface_default_v001.blend'. If a client
+    # computed a stale version it re-runs to version up.
+    published_names = {_os.path.basename(rel)
+                       for rec in task.get("publishes") or []
+                       for rel in rec.get("files") or []}
+    clash = sorted({_os.path.basename(f) for f in local_files} & published_names)
     if clash:
         raise ValueError(
-            "version(s) " + ", ".join(f"v{v:03d}" for v in clash) +
+            "file(s) " + ", ".join(clash) +
             f" already published for task {task_id}; refusing to overwrite. "
             "Re-run publish to get the next version.")
     rels = []

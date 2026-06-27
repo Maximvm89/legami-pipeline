@@ -253,6 +253,25 @@ def test_publish_task_refuses_to_overwrite_existing_version():
     assert tasks.published_versions(reloaded) == {1, 2}
 
 
+def test_publish_task_different_looks_share_version_number():
+    # Two named looks version independently: clean_v001 must NOT clash with
+    # default_v001 (they're different files), only an identical file is refused.
+    s = FakeSrv()
+    t = tasks.save_task(s, "/r",
+                        tasks.new_task("asset", "characters/frank", "surface"))
+    tasks.publish_task(s, "/r", "marco",
+                       ["/tmp/frank_surface_default_v001.blend"], t["id"])
+    # a *different look* at v001 — allowed
+    rels = tasks.publish_task(s, "/r", "marco",
+                              ["/tmp/frank_surface_clean_v001.blend"], t["id"])
+    assert rels and rels[0].endswith("frank_surface_clean_v001.blend")
+    # re-publishing the SAME look+version is still refused
+    import pytest
+    with pytest.raises(ValueError, match="already published"):
+        tasks.publish_task(s, "/r", "marco",
+                           ["/tmp/frank_surface_clean_v001.blend"], t["id"])
+
+
 def test_sequences_from_tasks():
     ts = [
         tasks.new_task("shot", "SEQ010/SH0010", "animation"),
