@@ -1240,6 +1240,12 @@ class MainWindow(QMainWindow):
             if blend_rel:
                 self._conn_do(lambda c: c.download(
                     core.remote_path_for(remote_root, blend_rel), open_file))
+            # Surface/rig shade or rig the published model — pre-fetch it so the
+            # "Load published model" button (and auto-load) work offline-fast.
+            if task.get("step") in ("surface", "rig") and task.get("type") == "asset":
+                mp = self._fetch_model_publish(task, local_root, remote_root)
+                if mp:
+                    extra_env["LEGAMI_MODEL_PUBLISH"] = mp
             return launch(cfg, creds, extra_env=extra_env, open_file=open_file)
 
         def done(rc):
@@ -1256,6 +1262,25 @@ class MainWindow(QMainWindow):
 
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg="Fetching version + launching Blender…")
+
+    def _fetch_model_publish(self, task: dict, local_root: str,
+                             remote_root: str) -> str | None:
+        """Download the asset's latest published model .blend locally and return
+        its path, so a surface/rig session can load it. Runs on the Job thread
+        (has the connection); returns None if there's no published model yet."""
+        model_id = tasksmod.model_task_id(task.get("entity", ""))
+        model_task = self._conn_do(
+            lambda c: tasksmod.get_task(c, remote_root, model_id))
+        if not model_task:
+            return None
+        pubs = tasksmod.published_files(model_task)
+        if not pubs:
+            return None
+        rel = pubs[0]["rel"]
+        local = core.local_path_for(local_root, rel)
+        self._conn_do(lambda c: c.download(
+            core.remote_path_for(remote_root, rel), local))
+        return local
 
     def _new_asset(self):
         if not self.cfg:

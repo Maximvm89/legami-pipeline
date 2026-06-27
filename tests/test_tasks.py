@@ -268,3 +268,31 @@ def test_new_task_distinct_ids_per_step():
     ids = {tasks.new_task("shot", "SEQ010/SH0010", s)["id"]
            for s in ("layout", "animation", "lighting")}
     assert len(ids) == 3   # multi-step creation yields distinct tasks
+
+
+def test_model_task_id_is_sibling():
+    # The surface task's model sibling is the same entity at the 'model' step.
+    surf = tasks.new_task("asset", "characters/hero", "surface")
+    assert tasks.model_task_id(surf["entity"]) == \
+        tasks.make_id("asset", "characters/hero", "model")
+
+
+def test_publish_task_textures_go_under_textures_subdir():
+    s = FakeSrv()
+    t = tasks.save_task(s, "/r", tasks.new_task("asset", "characters/hero", "surface"))
+    rels = tasks.publish_task(
+        s, "/r", "marco",
+        ["/tmp/hero_surface_v001.blend", "/tmp/hero_surface_v001.manifest.json"],
+        t["id"], description="first look",
+        texture_files=["/tmp/diffuse.a1b2c3d4.png", "/tmp/normal.e5f6a7b8.exr"])
+    base = "03_assets/characters/hero/surface/publish/"
+    # the .blend and manifest stay flat; textures land under publish/textures/
+    assert rels[0] == base + "hero_surface_v001.blend"
+    assert rels[1] == base + "hero_surface_v001.manifest.json"
+    assert base + "textures/diffuse.a1b2c3d4.png" in rels
+    assert base + "textures/normal.e5f6a7b8.exr" in rels
+    assert "/r/" + base + "textures/diffuse.a1b2c3d4.png" in s.files
+    # version detection still keys off the .blend, so the overwrite guard holds
+    reloaded = tasks.get_task(s, "/r", t["id"])
+    assert tasks.published_versions(reloaded) == {1}
+    assert reloaded["publishes"][0]["files"] == rels

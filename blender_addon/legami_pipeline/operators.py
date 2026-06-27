@@ -1,12 +1,16 @@
 """Blender operators for the Legami pipeline addon."""
 
+import json
 import os
+import shutil
 import subprocess
+import types
 
 import bpy
 
 from . import settings_io
 from . import checks
+from . import textures
 
 
 def _prefs():
@@ -324,6 +328,79 @@ def active_publish_locator():
     return bpy.data.objects.get(publish_locator_name())
 
 
+def _used_file_images():
+    """Images with an external source file that are actually used (have users).
+    These are the textures a surface look depends on."""
+    return [img for img in bpy.data.images
+            if getattr(img, "source", "") == "FILE"
+            and getattr(img, "users", 0) > 0]
+
+
+def _image_src(img):
+    """Absolute path to an image's source file ('//' resolved), or '' if none."""
+    fp = getattr(img, "filepath_raw", "") or getattr(img, "filepath", "")
+    return bpy.path.abspath(fp) if fp else ""
+
+
+def _texture_check_records():
+    """Lightweight records for checks.check_surface: a used texture is missing if
+    it's not packed and its source file isn't on disk (publishing it would ship a
+    dead path). Kept as plain namespaces so checks.py stays bpy-free."""
+    recs = []
+    for img in _used_file_images():
+        packed = bool(getattr(img, "packed_file", None))
+        src = _image_src(img)
+        missing = (not packed) and (not src or not os.path.isfile(src))
+        recs.append(types.SimpleNamespace(name=img.name, is_missing=missing))
+    return recs
+
+
+def _run_task_checks(step, context):
+    """run_checks with surface texture state injected for the surface step."""
+    extra = _texture_check_records() if step == "surface" else None
+    return checks.run_checks(step, context.scene, list(context.scene.objects),
+                             publish_locator_name(), textures=extra)
+
+
+def _copy_textures_for_publish(publish_dir, base, version):
+    """Copy every external texture into publish_dir/textures/ under a content hash,
+    repoint each image to its absolute copy (so save_as_mainfile(relative_remap)
+    bakes a '//textures/…' path), and build the manifest. Returns
+    (copied_paths, manifest, restore) — restore() puts the artist's original
+    filepaths back so their working session is untouched."""
+    textures_dir = os.path.join(publish_dir, "textures")
+    originals = {}              # img -> original filepath (to restore after saving)
+    entries = {}               # hashed name -> manifest entry (natural dedupe)
+    copied = []
+    for img in _used_file_images():
+        src = _image_src(img)
+        if not src or not os.path.isfile(src):
+            continue           # packed-only/missing: left to the .blend / checks
+        sha = textures.sha1_file(src)
+        stem, ext = os.path.splitext(os.path.basename(src))
+        name = textures.hashed_name(stem, ext, sha)
+        dst = os.path.join(textures_dir, name)
+        if name not in entries:
+            os.makedirs(textures_dir, exist_ok=True)
+            if not os.path.isfile(dst):
+                shutil.copy2(src, dst)
+            copied.append(dst)
+            w, h = (list(getattr(img, "size", [0, 0])) + [0, 0])[:2]
+            cs = getattr(getattr(img, "colorspace_settings", None), "name", "")
+            entries[name] = textures.texture_entry(dst, name, w, h, cs, sha)
+        originals[img] = getattr(img, "filepath_raw", img.filepath)
+        img.filepath = dst     # absolute now; relative_remap fixes it on save
+
+    def restore():
+        for img, fp in originals.items():
+            try:
+                img.filepath = fp
+            except Exception:  # noqa: BLE001
+                pass
+
+    return copied, textures.build_manifest(list(entries.values()), base, version), restore
+
+
 class LEGAMI_OT_turntable_framing(bpy.types.Operator):
     bl_idname = "legami.turntable_framing"
     bl_label = "Turntable Framing"
@@ -447,9 +524,7 @@ class LEGAMI_OT_check(bpy.types.Operator):
     def invoke(self, context, event):
         task = active_task()
         step = task["step"] if task else ""
-        self._issues = checks.run_checks(step, context.scene,
-                                         list(context.scene.objects),
-                                         publish_locator_name())
+        self._issues = _run_task_checks(step, context)
         return context.window_manager.invoke_props_dialog(self, width=460)
 
     def draw(self, context):
@@ -475,9 +550,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
             self.report({"ERROR"}, "No active task. Open this scene from the "
                                    "Workspace app's 'Open in Blender'.")
             return {"CANCELLED"}
-        self._issues = checks.run_checks(task["step"], context.scene,
-                                         list(context.scene.objects),
-                                         publish_locator_name())
+        self._issues = _run_task_checks(task["step"], context)
         return context.window_manager.invoke_props_dialog(
             self, width=480, title="Publish", confirm_text="Publish")
 
@@ -501,9 +574,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
             self.report({"ERROR"}, "No active task.")
             return {"CANCELLED"}
 
-        issues = checks.run_checks(task["step"], context.scene,
-                                   list(context.scene.objects),
-                                   publish_locator_name())
+        issues = _run_task_checks(task["step"], context)
         if checks.has_errors(issues):
             errs = [m for lvl, m in issues if lvl == checks.ERROR]
             self.report({"ERROR"}, "Publish blocked: " + errs[0])
@@ -523,29 +594,51 @@ class LEGAMI_OT_publish(bpy.types.Operator):
             return {"CANCELLED"}
         pub_path = os.path.join(publish_dir, f"{base}_v{version:03d}.blend")
 
-        bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)
-        files = [pub_path]
-        fbx_path = pub_path[:-6] + ".fbx"   # .blend -> .fbx
-        # Export only the geometry under the publish locator, if present.
-        loc = bpy.data.objects.get(publish_locator_name())
-        use_sel = False
-        if loc:
+        texture_files = []
+        if task["step"] == "surface":
+            # Surface look: make textures safe (copy beside the .blend, relative
+            # paths), write a manifest, and don't FBX — the deliverable is the
+            # shaded .blend + its textures, loadable anywhere it's synced.
+            copied, manifest, restore = _copy_textures_for_publish(
+                publish_dir, base, version)
             try:
-                bpy.ops.object.mode_set(mode="OBJECT")
-            except Exception:  # noqa: BLE001
-                pass
-            bpy.ops.object.select_all(action="DESELECT")
-            loc.select_set(True)
-            for d in _descendants(loc):
-                d.select_set(True)
-            use_sel = True
-        if _export_fbx(fbx_path, use_selection=use_sel):
-            files.append(fbx_path)
+                bpy.ops.wm.save_as_mainfile(
+                    filepath=pub_path, copy=True, relative_remap=True)
+            finally:
+                restore()      # leave the artist's working session untouched
+            manifest_path = pub_path[:-6] + ".manifest.json"   # _vNNN.blend -> .manifest.json
+            with open(manifest_path, "w") as fh:
+                json.dump(manifest, fh, indent=2)
+            files = [pub_path, manifest_path]
+            texture_files = copied
+            kind = f".blend + {len(copied)} texture(s)"
+        else:
+            bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)
+            files = [pub_path]
+            fbx_path = pub_path[:-6] + ".fbx"   # .blend -> .fbx
+            # Export only the geometry under the publish locator, if present.
+            loc = bpy.data.objects.get(publish_locator_name())
+            use_sel = False
+            if loc:
+                try:
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                except Exception:  # noqa: BLE001
+                    pass
+                bpy.ops.object.select_all(action="DESELECT")
+                loc.select_set(True)
+                for d in _descendants(loc):
+                    d.select_set(True)
+                use_sel = True
+            if _export_fbx(fbx_path, use_selection=use_sel):
+                files.append(fbx_path)
+            kind = ".blend + FBX"
 
-        pub_cmd, td = _toolkit_cmd(
-            ["publish", "--local", *files, "--task", task["id"],
-             "--status", "review",
-             "--description", context.window_manager.legami_publish_desc])
+        pub_args = ["publish", "--local", *files, "--task", task["id"],
+                    "--status", "review",
+                    "--description", context.window_manager.legami_publish_desc]
+        for t in texture_files:
+            pub_args += ["--texture", t]
+        pub_cmd, td = _toolkit_cmd(pub_args)
         if pub_cmd is None:
             self.report({"WARNING"},
                         f"Saved {len(files)} file(s) to publish/, but the toolkit "
@@ -574,9 +667,79 @@ class LEGAMI_OT_publish(bpy.types.Operator):
 
         warns = sum(1 for lvl, _ in issues if lvl == checks.WARNING)
         suffix = f" ({warns} warning(s))" if warns else ""
-        self.report({"INFO"}, f"Published {base}_v{version:03d} (.blend + FBX); "
+        self.report({"INFO"}, f"Published {base}_v{version:03d} ({kind}); "
                               f"task → Review.{suffix}{tt_msg}")
         return {"FINISHED"}
+
+
+class LEGAMI_OT_load_model(bpy.types.Operator):
+    bl_idname = "legami.load_model"
+    bl_label = "Load published model"
+    bl_description = ("Append the latest published model geometry for this asset "
+                      "into the scene, under the publish locator, ready to shade")
+
+    def execute(self, context):
+        task = active_task()
+        if not task or task.get("type") != "asset" or not task.get("entity"):
+            self.report({"ERROR"}, "No active asset task — open a surface/rig task "
+                                   "from the Workspace app.")
+            return {"CANCELLED"}
+        # The Workspace app may have pre-downloaded the model publish; else fetch it.
+        model_blend = os.environ.get("LEGAMI_MODEL_PUBLISH")
+        if not model_blend or not os.path.isfile(model_blend):
+            model_blend = self._fetch_model(task)
+        if not model_blend or not os.path.isfile(model_blend):
+            self.report({"ERROR"}, "No published model found for this asset — "
+                                   "publish the model step first.")
+            return {"CANCELLED"}
+
+        added = self._append_objects(context, model_blend)
+        if not added:
+            self.report({"ERROR"}, "Published model file held no objects.")
+            return {"CANCELLED"}
+        self._parent_under_locator(context, added)
+        self.report({"INFO"}, f"Loaded {len(added)} object(s) from "
+                              f"{os.path.basename(model_blend)} — shade away.")
+        return {"FINISHED"}
+
+    def _fetch_model(self, task):
+        cmd, td = _toolkit_cmd(
+            ["fetch-publish", "--task", task["id"], "--step", "model"])
+        if cmd is None:
+            return None
+        try:
+            out = subprocess.check_output(cmd, cwd=td, text=True).strip()
+            return out.splitlines()[-1] if out else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _append_objects(self, context, blend_path):
+        with bpy.data.libraries.load(blend_path, link=False) as (src, dst):
+            dst.objects = list(src.objects)
+        added = [o for o in dst.objects if o is not None]
+        coll = context.scene.collection.objects
+        for o in added:
+            if o.name not in coll:
+                try:
+                    coll.link(o)
+                except RuntimeError:
+                    pass
+        return added
+
+    def _parent_under_locator(self, context, objs):
+        name = publish_locator_name()
+        loc = bpy.data.objects.get(name)
+        if loc is None:
+            loc = bpy.data.objects.new(name, None)
+            loc.empty_display_type = "PLAIN_AXES"
+            loc.empty_display_size = 0.5
+            context.scene.collection.objects.link(loc)
+        added = set(objs)
+        for o in objs:
+            # Re-root only the model's own top-level objects, preserving its
+            # internal hierarchy.
+            if o.parent is None or o.parent not in added:
+                o.parent = loc
 
 
 class LEGAMI_OT_preview_turntable(bpy.types.Operator):
@@ -618,6 +781,7 @@ CLASSES = (
     LEGAMI_OT_save_to_task,
     LEGAMI_OT_check,
     LEGAMI_OT_publish,
+    LEGAMI_OT_load_model,
     LEGAMI_OT_turntable_framing,
     LEGAMI_OT_preview_turntable,
 )

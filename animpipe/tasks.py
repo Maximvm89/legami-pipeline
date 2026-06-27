@@ -114,11 +114,15 @@ def published_files(task: dict, ext: str = ".blend") -> list[dict]:
 
 def publish_task(sftp, remote_root: str, username: str, local_files,
                  task_id: str, status: str = "review",
-                 description: str = "") -> list[str] | None:
+                 description: str = "", texture_files=None) -> list[str] | None:
     """Publish one or more files for a task: upload each into the task's publish/
     folder, record attribution, append a publish-history entry (with the artist's
     description), and advance the task status. Returns the published rel paths,
-    or None if the task doesn't exist."""
+    or None if the task doesn't exist.
+
+    `texture_files` go into publish/textures/ (subdir preserved) rather than flat —
+    so a surface publish's images sit beside the .blend that references them with
+    relative `//textures/...` paths, and the look loads anywhere it's synced."""
     import os as _os
     from . import ledger
 
@@ -140,6 +144,10 @@ def publish_task(sftp, remote_root: str, username: str, local_files,
     rels = []
     for f in local_files:
         rel = task_dir_rel(task) + "/publish/" + _os.path.basename(f)
+        sftp.upload(f, remote_root.rstrip("/") + "/" + rel)
+        rels.append(rel)
+    for f in texture_files or []:
+        rel = task_dir_rel(task) + "/publish/textures/" + _os.path.basename(f)
         sftp.upload(f, remote_root.rstrip("/") + "/" + rel)
         rels.append(rel)
     ledger.record_uploads(sftp, remote_root, username, rels)
@@ -169,6 +177,13 @@ def tasks_dir(remote_root: str) -> str:
 def make_id(ttype: str, entity: str, step: str) -> str:
     raw = f"{ttype}-{entity}-{step}".lower()
     return re.sub(r"[^a-z0-9._-]+", "_", raw)
+
+
+def model_task_id(asset_entity: str) -> str:
+    """Id of the model task for an asset entity (the upstream a surface/rig task
+    shades or rigs). Deterministic sibling of the current task — same entity, the
+    'model' step. Used to fetch the published model to load into a surface file."""
+    return make_id("asset", asset_entity, "model")
 
 
 def task_dir_rel(task: dict) -> str:

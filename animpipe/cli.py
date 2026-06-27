@@ -217,7 +217,8 @@ def cmd_new_task(args) -> int:
 
 def cmd_publish(args) -> int:
     cfg = ProjectConfig.load(args.config)
-    missing = [f for f in args.local if not os.path.isfile(f)]
+    missing = [f for f in [*args.local, *(args.texture or [])]
+               if not os.path.isfile(f)]
     if missing:
         print(f"error: local file(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1
@@ -230,13 +231,56 @@ def cmd_publish(args) -> int:
     with SFTPClient(creds) as client:
         rels = T.publish_task(client, cfg.remote_root, creds.user,
                               args.local, args.task, args.status,
-                              description=args.description)
+                              description=args.description,
+                              texture_files=args.texture)
     if not rels:
         print(f"error: task not found: {args.task}", file=sys.stderr)
         return 1
     for rel in rels:
         print(f"published -> {cfg.remote_root}/{rel}")
     print(f"task {args.task} -> {args.status}")
+    return 0
+
+
+def cmd_fetch_publish(args) -> int:
+    """Download a task's newest published file (default .blend) to a local folder
+    and print its path. Used by the Blender add-on to pull the latest model publish
+    into a surface workfile to shade."""
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import tasks as T
+    with SFTPClient(creds) as client:
+        task = T.get_task(client, cfg.remote_root, args.task)
+        if not task:
+            print(f"error: task not found: {args.task}", file=sys.stderr)
+            return 1
+        # --step redirects to the sibling task at that step (same entity), e.g. a
+        # surface task fetching its asset's published model.
+        if args.step and args.step != task.get("step"):
+            sib = T.make_id(task.get("type", "asset"), task.get("entity", ""),
+                            args.step)
+            task = T.get_task(client, cfg.remote_root, sib)
+            if not task:
+                print(f"error: no '{args.step}' task for {args.task}",
+                      file=sys.stderr)
+                return 1
+        pubs = T.published_files(task, ext=args.ext)
+        if not pubs:
+            print(f"error: no published {args.ext} for task {args.task}",
+                  file=sys.stderr)
+            return 1
+        rel = pubs[0]["rel"]                      # newest first
+        # Default into the local mirror of the publish folder, so it's cached where
+        # the rest of the project syncs; fall back to cwd if no local_root is set.
+        if args.into:
+            into = os.path.expanduser(args.into)
+        else:
+            into = os.path.join(cfg.resolved_local_root() or os.getcwd(),
+                                *os.path.dirname(rel).split("/"))
+        os.makedirs(into, exist_ok=True)
+        local_path = os.path.join(into, os.path.basename(rel))
+        client.download(cfg.remote_root.rstrip("/") + "/" + rel, local_path)
+    print(local_path)
     return 0
 
 
@@ -487,7 +531,21 @@ def build_parser() -> argparse.ArgumentParser:
                     help="task status to set after publish (default: review)")
     pb.add_argument("--description", default="",
                     help="publish notes recorded in the task history")
+    pb.add_argument("--texture", action="append", default=[],
+                    help="texture file to publish under publish/textures/ "
+                         "(repeatable); for surface looks")
     pb.set_defaults(func=cmd_publish)
+
+    fp = sub.add_parser("fetch-publish", parents=[common],
+                        help="download a task's newest published file (e.g. the "
+                             "model to shade)")
+    fp.add_argument("--task", required=True, help="task id to fetch from")
+    fp.add_argument("--step", help="fetch from the sibling task at this step "
+                                   "instead (same entity), e.g. 'model'")
+    fp.add_argument("--ext", default=".blend", help="file type (default: .blend)")
+    fp.add_argument("--into", help="local folder to download into "
+                                   "(default: local mirror of the publish folder)")
+    fp.set_defaults(func=cmd_fetch_publish)
 
     nv = sub.add_parser("next-version", parents=[common],
                         help="print the next publish version for a task")

@@ -84,3 +84,42 @@ def test_run_checks_blocks_without_locator():
     # a clean model but NO locator must now fail
     issues = checks.run_checks("model", _scene(), [_mesh("Body")])
     assert checks.has_errors(issues)
+
+
+# --- surface (shading/texturing) checks -------------------------------------
+
+def _shaded_mesh(name, parent=None, material=True):
+    slots = [types.SimpleNamespace(material=object() if material else None)]
+    return types.SimpleNamespace(type="MESH", name=name, scale=(1.0, 1.0, 1.0),
+                                 parent=parent, material_slots=slots)
+
+
+def _tex(name, missing):
+    return types.SimpleNamespace(name=name, is_missing=missing)
+
+
+def test_surface_clean_passes():
+    loc = _empty("PUBLISH")
+    geo = _shaded_mesh("Body", parent=loc)
+    issues = checks.run_checks("surface", _scene(), [loc, geo],
+                               textures=[_tex("diffuse", False)])
+    assert issues == []
+    assert not checks.has_errors(issues)
+
+
+def test_surface_missing_texture_errors():
+    loc = _empty("PUBLISH")
+    geo = _shaded_mesh("Body", parent=loc)
+    issues = checks.run_checks("surface", _scene(), [loc, geo],
+                               textures=[_tex("diffuse", False),
+                                         _tex("normal", True)])
+    assert checks.has_errors(issues)
+    assert any("normal" in m for lvl, m in issues if lvl == checks.ERROR)
+
+
+def test_surface_mesh_without_material_errors():
+    loc = _empty("PUBLISH")
+    geo = _shaded_mesh("Body", parent=loc, material=False)
+    issues = checks.run_checks("surface", _scene(), [loc, geo], textures=[])
+    assert checks.has_errors(issues)
+    assert any("material" in m for lvl, m in issues if lvl == checks.ERROR)

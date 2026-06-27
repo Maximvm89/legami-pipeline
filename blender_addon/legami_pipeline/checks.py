@@ -77,10 +77,57 @@ def check_publish_locator(objects, locator_name):
     return []
 
 
-def run_checks(step, scene, objects, locator="PUBLISH"):
+def _has_material(obj):
+    """True if a mesh has at least one real material assigned (via slots)."""
+    for slot in getattr(obj, "material_slots", []) or []:
+        if getattr(slot, "material", None) is not None:
+            return True
+    # Fallback for objects exposing data.materials directly.
+    for m in getattr(getattr(obj, "data", None), "materials", []) or []:
+        if m is not None:
+            return True
+    return False
+
+
+def check_surface(objects, locator_name, textures):
+    """Surface (shading/texturing) publish gate. The safety-critical rule: no
+    published look may carry a dead texture path, so every used image must resolve
+    to a file on disk (or be packed). Also flags geometry under the locator with no
+    material — an empty look. `textures` is a list of records duck-typed with
+    `.name` and `.is_missing` (the operator builds these from bpy.data.images so
+    this stays bpy-free and testable)."""
+    issues = []
+    for tex in textures or []:
+        if getattr(tex, "is_missing", False):
+            issues.append((ERROR,
+                           f"Texture '{getattr(tex, 'name', '?')}' has no file on "
+                           f"disk — fix or reload it; publishing would ship a dead "
+                           f"texture path."))
+    # Material coverage on the geometry that actually gets published.
+    loc = None
+    for o in objects:
+        name = getattr(o, "name", "")
+        if name == locator_name or name.split(".")[0] == locator_name:
+            loc = o
+            break
+    meshes = ([o for o in _descendants(objects, loc)
+               if getattr(o, "type", "") == "MESH"] if loc is not None
+              else [o for o in objects if getattr(o, "type", "") == "MESH"])
+    for o in meshes:
+        if not _has_material(o):
+            issues.append((ERROR,
+                           f"'{getattr(o, 'name', '?')}' has no material assigned "
+                           f"— a surface publish needs a look on every mesh."))
+    return issues
+
+
+def run_checks(step, scene, objects, locator="PUBLISH", textures=None):
     """Dispatch by task step. Every publish must have a populated publish locator."""
     if step == "model":
         issues = check_model(scene, objects)
+    elif step == "surface":
+        issues = check_units(scene)
+        issues += check_surface(objects, locator, textures)
     else:
         issues = check_units(scene)
     issues += check_publish_locator(objects, locator)

@@ -17,6 +17,9 @@ class LEGAMI_MT_menu(bpy.types.Menu):
         if task:
             layout.label(text=f"Task: {task['entity']}  ·  {task['step']}",
                          icon="OUTLINER_OB_ARMATURE")
+            # Surface/rig depend on the published model — pull it in to work on.
+            if task.get("step") in ("surface", "rig"):
+                layout.operator("legami.load_model", icon="IMPORT")
             layout.operator("legami.save_to_task", icon="FILE_TICK")
             layout.operator("legami.run_checks", icon="CHECKMARK")
             layout.operator("legami.publish", text="Publish…", icon="EXPORT")
