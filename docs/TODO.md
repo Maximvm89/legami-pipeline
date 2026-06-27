@@ -14,6 +14,23 @@ Running backlog of things to build/fix. Newest context at the top of each sectio
   config download synchronously on the UI thread, so a bad host/root freezes the
   window until it errors. Move it onto a `Job` thread like the other SFTP ops.
 
+## Review
+
+- [ ] **Surface/look review step (after testing the look publish).** The look
+  review needs to be richer than the model turntable. When a surface task is
+  published as a look, generate review media that shows the *shading*, not just the
+  silhouette:
+  - a **turntable of the shaded model** — apply the published look onto the model
+    (load model → `apply_look` → render), reusing the turntable pipeline;
+  - **texture/UV-tile contact sheets** — render or lay out each UDIM tile so the
+    reviewer can confirm the maps and tiles resolve correctly (no missing/magenta
+    tiles, right colorspaces);
+  - surface it in the Dailies tab alongside the existing turntable review, with the
+    same to_review/reviewed/approved status flow.
+  Think through the exact media + layout after the look publish is tested live.
+  (touches `animpipe/turntable.py`, the look apply path, `animpipe/review.py`,
+  `workspace_app/gui.py` Dailies tab)
+
 ## Assets / textures
 
 - [ ] **Texture delivery across machines.** Model files reference external/packed
