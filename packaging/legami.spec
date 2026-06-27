@@ -16,8 +16,11 @@ ROOT = os.path.abspath(os.getcwd())
 # bootstrap the launcher passes to `blender --python` to auto-load the Legami menu.
 # Plus the imageio-ffmpeg binary so MP4 encoding works on a machine with no ffmpeg.
 datas = [(os.path.join(ROOT, "animpipe", "blender_turntable.py"), "animpipe"),
-         (os.path.join(ROOT, "animpipe", "blender_bootstrap.py"), "animpipe")]
+         (os.path.join(ROOT, "animpipe", "blender_bootstrap.py"), "animpipe"),
+         (os.path.join(ROOT, "packaging", "legami.png"), ".")]  # runtime window icon
 datas += collect_data_files("imageio_ffmpeg")
+
+ICON = os.path.join(ROOT, "packaging", "legami.ico")  # embedded in the .exe files
 
 # syncsketch + requests are imported lazily (inside animpipe.syncsketch), so name
 # them explicitly to be sure the frozen bundle can push dailies to SyncSketch.
@@ -43,11 +46,11 @@ MERGE((cli_a, "animpipe", "animpipe"),
 
 cli_pyz = PYZ(cli_a.pure)
 cli_exe = EXE(cli_pyz, cli_a.scripts, [], exclude_binaries=True,
-              name="animpipe", console=True)
+              name="animpipe", console=True, icon=ICON)
 
 gui_pyz = PYZ(gui_a.pure)
 gui_exe = EXE(gui_pyz, gui_a.scripts, [], exclude_binaries=True,
-              name="Legami-Workspace", console=False)
+              name="Legami-Workspace", console=False, icon=ICON)
 
 coll = COLLECT(
     cli_exe, cli_a.binaries, cli_a.datas,

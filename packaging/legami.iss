@@ -32,6 +32,9 @@ OutputBaseFilename=Legami-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Installer's own icon (relative to this .iss). Shortcuts inherit the icon
+; embedded in Legami-Workspace.exe by PyInstaller.
+SetupIconFile=legami.ico
 UninstallDisplayName={#AppName} {#AppVersion}
 UninstallDisplayIcon={app}\Legami-Workspace.exe
 

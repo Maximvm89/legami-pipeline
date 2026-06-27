@@ -17,7 +17,7 @@ import threading
 import webbrowser
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QBrush, QColor, QAction
+from PySide6.QtGui import QBrush, QColor, QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QTreeWidget, QTreeWidgetItem,
@@ -1383,9 +1383,21 @@ class BugReportDialog(QDialog):
         self.accept()
 
 
+def _app_icon_path() -> str:
+    """The window icon, shipped as data (sys._MEIPASS root when frozen, else the
+    packaging/ folder in a source checkout)."""
+    name = "legami.png"
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, name)
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "packaging", name)
+
+
 def main():
     applog.setup_logging()
     app = QApplication(sys.argv)
+    icon = _app_icon_path()
+    if os.path.isfile(icon):
+        app.setWindowIcon(QIcon(icon))
     config = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
     win = MainWindow(config)
     win.show()
