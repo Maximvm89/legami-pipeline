@@ -43,6 +43,29 @@ NEWER_L_BG = QColor(203, 225, 255)
 NEWER_R_BG = QColor(255, 230, 191)
 DIFF_BG, DIFF_FG = QColor(252, 235, 235), QColor(163, 45, 45)
 
+# Task status visuals: status -> (cell background, text color, leading dot).
+STATUS_STYLE = {
+    "todo":        (QColor(237, 238, 240), QColor(88, 92, 100), "⚪"),
+    "in_progress": (QColor(219, 234, 254), QColor(30, 64, 140), "🔵"),
+    "review":      (QColor(255, 237, 213), QColor(146, 64, 14), "🟠"),
+    "done":        (QColor(220, 243, 228), QColor(22, 101, 52), "🟢"),
+}
+# A small icon per task type and per department/step (first substring match wins).
+TYPE_ICON = {"asset": "📦", "shot": "🎬"}
+STEP_ICONS = (
+    ("model", "🧊"), ("surfac", "🎨"), ("textur", "🎨"), ("shad", "🎨"),
+    ("look", "🎨"), ("groom", "🧶"), ("rig", "🦴"), ("layout", "📐"),
+    ("anim", "🎞"), ("light", "💡"), ("comp", "🟦"), ("fx", "✨"),
+)
+
+
+def step_icon(step: str) -> str:
+    s = (step or "").lower()
+    for key, ic in STEP_ICONS:
+        if key in s:
+            return ic
+    return "▫️"
+
 ROLE_NODE = Qt.UserRole
 ROLE_LOADED = Qt.UserRole + 1
 
@@ -299,6 +322,9 @@ class MainWindow(QMainWindow):
         self.tasks_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tasks_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tasks_table.setSortingEnabled(True)
+        self.tasks_table.setAlternatingRowColors(True)
+        self.tasks_table.setShowGrid(False)
+        self.tasks_table.verticalHeader().setDefaultSectionSize(26)
         self.tasks_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.tasks_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tasks_table.customContextMenuRequested.connect(self._task_context_menu)
@@ -958,9 +984,15 @@ class MainWindow(QMainWindow):
         self.tasks_table.setSortingEnabled(False)
         self.tasks_table.setRowCount(len(rows))
         for i, t in enumerate(rows):
+            status = t.get("status", "")
+            ttype = t.get("type", "")
+            step = t.get("step", "")
+            bg, fg, dot = STATUS_STYLE.get(status, (None, None, "•"))
             cells = [
-                t.get("type", ""), t.get("entity", ""), t.get("step", ""),
-                tasksmod.STATUS_LABELS.get(t.get("status", ""), t.get("status", "")),
+                f"{TYPE_ICON.get(ttype, '•')}  {ttype}",
+                t.get("entity", ""),
+                f"{step_icon(step)}  {step}",
+                f"{dot}  {tasksmod.STATUS_LABELS.get(status, status)}",
                 ", ".join(t.get("assignees") or []),
                 t.get("updated_by", ""),
             ]
@@ -968,6 +1000,12 @@ class MainWindow(QMainWindow):
                 item = QTableWidgetItem(text)
                 if j == 0:
                     item.setData(Qt.UserRole, t)
+                if j == 3 and bg is not None:
+                    item.setBackground(QBrush(bg))
+                    item.setForeground(QBrush(fg))
+                    f = item.font()
+                    f.setBold(True)
+                    item.setFont(f)
                 self.tasks_table.setItem(i, j, item)
         self.tasks_table.setSortingEnabled(True)
 
