@@ -658,9 +658,6 @@ class LEGAMI_OT_publish(bpy.types.Operator):
             wm = context.window_manager
             col.prop(wm, "legami_look_name", text="Look name")
             col.prop(wm, "legami_render_turntable", text="Render look review")
-            sub = col.column()
-            sub.enabled = wm.legami_render_turntable
-            sub.prop(wm, "legami_lookdev_hdri", text="Review HDRI")
         col.separator()
         _draw_checks(col, self._issues)
         col.separator()
@@ -782,11 +779,8 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         elif (task.get("step") == "surface"
                 and context.window_manager.legami_render_turntable):
             try:
-                lr_args = ["look-review", "--task", task["id"], "--look", look_name]
-                hdri = context.window_manager.legami_lookdev_hdri
-                if hdri:                       # '' = project default (no flag)
-                    lr_args += ["--hdri", hdri]
-                lr_cmd, _ = _toolkit_cmd(lr_args)
+                lr_cmd, _ = _toolkit_cmd(
+                    ["look-review", "--task", task["id"], "--look", look_name])
                 subprocess.Popen(lr_cmd, cwd=td)
                 tt_msg = " Look review (turntable + texture sheet) rendering → dailies."
             except Exception as exc:  # noqa: BLE001

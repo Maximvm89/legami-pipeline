@@ -101,72 +101,37 @@ def run_look_review(cfg, creds, *, task_id: str, entity: str, base: str,
                     manifest_path: str, blend_rel: str, hdri: str | None = None,
                     dry_run: bool = False) -> int:
     """Render a shaded look turntable + texture/UV sheet and publish both into
-    07_dailies, attached to the look's publish record. `base` is the look base
-    (e.g. 'frankenstein_surface_default'); textures live in
-    <look publish dir>/textures/<base>_vNNN/."""
+    07_dailies, attached to the look's publish record. The turntable REUSES the
+    model turntable pipeline (run_turntable) — same template, framing and lighting —
+    just with the look applied to the model. The sheet is built from the published
+    tiles + the UV wireframe the render dumps."""
     import tempfile
     from .sftp import SFTPClient
-    from .launcher import find_blender, _resolve_ocio
     from . import texsheet
 
     local_root = cfg.resolved_local_root()
     version_label = f"{base}_v{version:03d}"
-    tt_rel = look_dailies_rel(entity, version_label, "turntable.mp4")
+    tt_rel = dailies_rel({"entity": entity, "step": "surface"}, version_label)
     sheet_rel = look_dailies_rel(entity, version_label, "textures.png")
-    tt_local = os.path.join(local_root, *tt_rel.split("/"))
     sheet_local = os.path.join(local_root, *sheet_rel.split("/"))
     tiles_dir = os.path.join(os.path.dirname(look_blend), "textures", version_label)
-
-    settings = turntable_settings(_load_project_settings(local_root))
+    uv_json = os.path.join(tempfile.gettempdir(), f"_lr_uv_{version_label}.json")
 
     if dry_run:
-        print(f"(dry-run) would render look review of {base} v{version:03d}\n"
-              f"          turntable -> {tt_rel}\n          sheet     -> {sheet_rel}\n"
-              f"          hdri: {os.path.basename(hdri) if hdri else '(neutral)'}")
+        print(f"(dry-run) would render look review of {base} v{version:03d} on the "
+              f"model turntable template\n          turntable -> {tt_rel}\n"
+              f"          sheet     -> {sheet_rel}")
         return 0
 
-    blender = find_blender(cfg.blender_path)
-    if not blender:
-        print("error: Blender not found for look-review render.")
-        return 1
+    # 1) Shaded turntable via the SAME template/rig as model turntables.
+    rc = run_turntable(cfg, creds, model_path, task_id,
+                       version_label=version_label, look_blend=look_blend,
+                       manifest_path=manifest_path, uv_out=uv_json,
+                       record_blend_rel=blend_rel)
+    if rc:
+        return rc
 
-    frames_dir = os.path.join(os.path.dirname(tt_local), f"_lr_frames_{version_label}")
-    uv_json = os.path.join(tempfile.gettempdir(), f"_lr_uv_{version_label}.json")
-    env = os.environ.copy()
-    ocio = _resolve_ocio(local_root)
-    if ocio:
-        env["BLENDER_OCIO"] = ocio
-    env.update({
-        "LEGAMI_LR_MODEL": model_path,
-        "LEGAMI_LR_LOOK": look_blend,
-        "LEGAMI_LR_MANIFEST": manifest_path,
-        "LEGAMI_LR_HDRI": hdri or "",
-        "LEGAMI_LR_LOCATOR": (_load_project_settings(local_root).get("publish") or {})
-                              .get("locator") or "PUBLISH",
-        "LEGAMI_LR_UV_OUT": uv_json,
-        "LEGAMI_TT_OUTPUT": tt_local,
-        "LEGAMI_TT_FRAMES_DIR": frames_dir,
-        "LEGAMI_TT_FRAMES": str(settings["frames"]),
-        "LEGAMI_TT_RESX": str(settings["resolution_x"]),
-        "LEGAMI_TT_RESY": str(settings["resolution_y"]),
-        "LEGAMI_TT_FPS": str(settings["fps"]),
-        "LEGAMI_TT_ENGINE": str(settings["engine"]),
-        "LEGAMI_TT_VIEW": str(settings.get("view_transform", "")),
-    })
-
-    script = _bundled_path("blender_look_review.py")
-    print(f"Rendering look-review turntable ({base} v{version:03d})…")
-    subprocess.run([blender, "--background", "--python", script], env=env, check=True)
-
-    fps = _meta_fps(frames_dir, settings["fps"])
-    os.makedirs(os.path.dirname(tt_local), exist_ok=True)
-    ok = _encode_mp4(frames_dir, tt_local, fps)
-    _cleanup_dir(frames_dir)
-    if not ok or not os.path.isfile(tt_local):
-        print("error: look-review turntable encode produced no file.")
-        return 1
-
-    # Texture/UV sheet from the published tiles + the UV wireframe.
+    # 2) Texture/UV sheet from the published tiles + the UV wireframe.
     entries = []
     if os.path.isfile(manifest_path):
         try:
@@ -174,22 +139,18 @@ def run_look_review(cfg, creds, *, task_id: str, entity: str, base: str,
         except ValueError:
             entries = []
     try:
-        texsheet.build_sheet(tiles_dir, entries, sheet_local,
-                             uv_segments=uv_json,
+        os.makedirs(os.path.dirname(sheet_local), exist_ok=True)
+        texsheet.build_sheet(tiles_dir, entries, sheet_local, uv_segments=uv_json,
                              title=f"{entity} · {base} · v{version:03d}")
     except Exception as exc:  # noqa: BLE001
-        print(f"warning: texture sheet failed ({exc}); publishing turntable only.")
-        sheet_local = None
+        print(f"warning: texture sheet failed ({exc}); turntable published without it.")
+        return 0
 
     with SFTPClient(creds) as client:
-        client.upload(tt_local, cfg.remote_root.rstrip("/") + "/" + tt_rel)
-        sheet_arg = None
-        if sheet_local and os.path.isfile(sheet_local):
-            client.upload(sheet_local, cfg.remote_root.rstrip("/") + "/" + sheet_rel)
-            sheet_arg = sheet_rel
+        client.upload(sheet_local, cfg.remote_root.rstrip("/") + "/" + sheet_rel)
         record_review_media(client, cfg.remote_root, task_id, blend_rel, creds.user,
-                            turntable=tt_rel, sheet=sheet_arg)
-    print(f"published look review -> {tt_rel}" + (f" + {sheet_rel}" if sheet_arg else ""))
+                            sheet=sheet_rel)
+    print(f"published look texture sheet -> {sheet_rel}")
     return 0
 
 
@@ -251,16 +212,21 @@ def _load_project_settings(local_root: str) -> dict:
 
 
 def run_turntable(cfg, creds, model_path: str, task_id: str,
-                  dry_run: bool = False, preview: bool = False) -> int:
-    """Render a turntable from model_path and publish it to 07_dailies. With
-    preview=True, open Blender interactively through the turntable camera (no
-    render, no publish) so framing/scale can be dialed in."""
+                  dry_run: bool = False, preview: bool = False, *,
+                  version_label: str | None = None, look_blend: str | None = None,
+                  manifest_path: str | None = None, uv_out: str | None = None,
+                  record_blend_rel: str | None = None) -> int:
+    """Render a turntable from model_path and publish it to 07_dailies. Reused for
+    look reviews: pass look_blend + manifest_path to shade the model with a published
+    look first (same template rig), version_label to name the daily after the look,
+    uv_out to dump the UV wireframe, and record_blend_rel to attach the turntable to a
+    specific publish record. preview=True opens Blender interactively (no render)."""
     from .sftp import SFTPClient
     from . import tasks
     from .launcher import find_blender, _resolve_ocio
 
     local_root = cfg.resolved_local_root()
-    version_label = os.path.splitext(os.path.basename(model_path))[0]  # panda_model_v003
+    version_label = version_label or os.path.splitext(os.path.basename(model_path))[0]
 
     need_task = not dry_run and not preview  # preview doesn't touch the task/server
     with SFTPClient(creds, dry_run=dry_run) as client:
@@ -303,6 +269,13 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
         "LEGAMI_TT_ENGINE": str(settings["engine"]),
         "LEGAMI_TT_VIEW": str(settings.get("view_transform", "")),
     })
+    # Look-review extras: shade the model with the look + dump UVs (the template
+    # script applies these after appending the model).
+    if look_blend:
+        env["LEGAMI_LR_LOOK"] = look_blend
+        env["LEGAMI_LR_MANIFEST"] = manifest_path or ""
+    if uv_out:
+        env["LEGAMI_LR_UV_OUT"] = uv_out
 
     # Template mode: open the artist's turntable .blend and append the model into
     # it, parented under a named control. Otherwise open the model and auto-rig.
@@ -354,6 +327,10 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
 
     with SFTPClient(creds) as client:
         client.upload(out_local, cfg.remote_root.rstrip("/") + "/" + rel)
-        record_turntable(client, cfg.remote_root, task_id, rel, creds.user)
+        if record_blend_rel:    # look review: attach to the exact look's record
+            record_review_media(client, cfg.remote_root, task_id, record_blend_rel,
+                                creds.user, turntable=rel)
+        else:
+            record_turntable(client, cfg.remote_root, task_id, rel, creds.user)
     print(f"published turntable -> {cfg.remote_root}/{rel}")
     return 0

@@ -155,6 +155,79 @@ def _delete_hierarchy(obj):
         pass
 
 
+def _apply_look(objects):
+    """If LEGAMI_LR_LOOK is set, append the look's materials and assign them onto the
+    given meshes by name (from the manifest's assignment map). Turns a model turntable
+    into a shaded look-review turntable, on the same template rig."""
+    import json
+    look = os.environ.get("LEGAMI_LR_LOOK")
+    if not look or not os.path.isfile(look):
+        return
+    names = []
+    with bpy.data.libraries.load(look, link=False) as (src, dst):
+        names = list(src.materials)
+        dst.materials = list(src.materials)
+    mats = {nm: m for nm, m in zip(names, dst.materials) if m is not None}
+    try:
+        assignments = json.load(open(os.environ.get("LEGAMI_LR_MANIFEST", ""))) \
+            .get("assignments", {})
+    except Exception as exc:  # noqa: BLE001
+        print("[Legami] look manifest unreadable:", exc)
+        assignments = {}
+    by_name = {o.name: o for o in objects}
+    assigned = 0
+    for mesh_name, slot_mats in assignments.items():
+        obj = by_name.get(mesh_name) or bpy.data.objects.get(mesh_name)
+        if obj is None or obj.type != "MESH":
+            continue
+        me = obj.data
+        for i, mname in enumerate(slot_mats):
+            mat = mats.get(mname) if mname else None
+            if i < len(me.materials):
+                me.materials[i] = mat
+            else:
+                me.materials.append(mat)
+        assigned += 1
+    print(f"[Legami] applied look: {len(mats)} material(s) -> {assigned} mesh(es)")
+
+
+def _export_uv_segments(objects):
+    """Dump the UV wireframe as deduped edge segments to LEGAMI_LR_UV_OUT (JSON) — the
+    toolkit draws it with PIL. bpy.ops.uv.export_layout needs a GPU and fails in
+    --background, so we read loop UVs directly."""
+    out = os.environ.get("LEGAMI_LR_UV_OUT")
+    if not out:
+        return
+    import json
+    meshes = [o for o in objects if o.type == "MESH" and not o.hide_render]
+    seen, segs, max_u, max_v = set(), [], 1.0, 1.0
+    for o in meshes:
+        uvl = o.data.uv_layers.active
+        if not uvl:
+            continue
+        uvs = uvl.data
+        for poly in o.data.polygons:
+            loops = list(poly.loop_indices)
+            n = len(loops)
+            for i in range(n):
+                a = uvs[loops[i]].uv
+                b = uvs[loops[(i + 1) % n]].uv
+                key = (round(a.x, 4), round(a.y, 4), round(b.x, 4), round(b.y, 4))
+                if key in seen or (key[2], key[3], key[0], key[1]) in seen:
+                    continue
+                seen.add(key)
+                segs.append([round(a.x, 5), round(a.y, 5),
+                             round(b.x, 5), round(b.y, 5)])
+                max_u = max(max_u, a.x, b.x)
+                max_v = max(max_v, a.y, b.y)
+    try:
+        with open(out, "w") as fh:
+            json.dump({"segments": segs, "max_u": max_u, "max_v": max_v}, fh)
+        print(f"[Legami] UV wireframe -> {out} ({len(segs)} edges)")
+    except Exception as exc:  # noqa: BLE001
+        print("[Legami] UV export skipped:", exc)
+
+
 def run_template_mode():
     """Append the model into the artist's turntable template, drop the showcase
     placeholder, seat the model on the asset socket, render with the template."""
@@ -270,6 +343,11 @@ def run_template_mode():
         print(f"[Legami] kept {hidden_n} object(s) hidden per artist visibility "
               f"(camera/monitor icon)")
 
+    # A look review reuses this whole template pipeline — just shade the model with
+    # the published look first, and export its UVs for the texture/UV sheet.
+    _apply_look(linked)
+    _export_uv_segments(linked)
+
     def _world_bbox(objs):
         mn = [1e18, 1e18, 1e18]
         mx = [-1e18, -1e18, -1e18]
@@ -376,6 +454,8 @@ def _set_engine(scene, want):
 
 def build_and_render():
     scene = bpy.context.scene
+    _apply_look(list(scene.objects))
+    _export_uv_segments(list(scene.objects))
     center, size = _bbox_center_size()
 
     pivot = bpy.data.objects.new("TT_Pivot", None)
