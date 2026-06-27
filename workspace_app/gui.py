@@ -938,6 +938,11 @@ class MainWindow(QMainWindow):
                 self._conn_do(lambda c: c.listdir(remote)), local, node.rel)
 
         def done(children):
+            # The tree may have been cleared/refreshed while this scan ran, deleting
+            # the row's C++ object — touching it then raises 'already deleted'.
+            from shiboken6 import isValid
+            if not isValid(item):
+                return
             item.takeChildren()  # drop the placeholder
             for child in children:
                 item.addChild(self._make_item(child))
