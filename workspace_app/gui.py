@@ -1211,7 +1211,11 @@ class MainWindow(QMainWindow):
         work_abs = os.path.join(local_root, *tasksmod.task_work_rel(task).split("/"))
 
         # Open priority: chosen version > latest published > latest local work file.
-        if blend_rel is None:
+        # Surface publishes a materials-only LOOK library (no scene) — opening it
+        # gives Blender's "Library file, loading empty scene". So for surface, never
+        # auto-open the publish: fall through to the work file (or a fresh shading
+        # scene). Use 'Apply look…' in another task to consume a look.
+        if blend_rel is None and task.get("step") != "surface":
             pubs = tasksmod.published_files(task)
             blend_rel = pubs[0]["rel"] if pubs else None
         open_file = None
