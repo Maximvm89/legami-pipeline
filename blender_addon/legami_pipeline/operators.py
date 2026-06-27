@@ -672,6 +672,27 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def scaffold_surface_scene():
+    """Set up a fresh surface (look-dev) file: a clean scene (no default
+    cube/camera/light) in the Shading workspace with material-preview viewports.
+    Called once at startup when the Workspace app opens an empty surface task."""
+    for o in list(bpy.data.objects):
+        bpy.data.objects.remove(o, do_unlink=True)
+    # Land in the Shading workspace (shader editor + material-preview viewport).
+    ws = bpy.data.workspaces.get("Shading")
+    for win in bpy.context.window_manager.windows:
+        if ws is not None and win.workspace is not ws:
+            win.workspace = ws
+    # Belt-and-braces: make any 3D viewport show materials, in case there's no
+    # Shading workspace (custom startup file).
+    for win in bpy.context.window_manager.windows:
+        for area in win.screen.areas:
+            if area.type == "VIEW_3D":
+                for space in area.spaces:
+                    if space.type == "VIEW_3D":
+                        space.shading.type = "MATERIAL"
+
+
 def _purge_orphan_data(data):
     """Remove a now-unused data-block (mesh/light/camera/…) so objects dropped
     during a selective append don't linger as orphans and ride into the next

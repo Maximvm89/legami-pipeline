@@ -1232,6 +1232,10 @@ class MainWindow(QMainWindow):
             "LEGAMI_TASK_TITLE": task.get("title", ""),
             "LEGAMI_TASK_WORK_DIR": work_abs,
         }
+        # Opening a surface task with nothing saved yet: start from a clean,
+        # shading-ready scene instead of Blender's default cube/camera/light.
+        if task.get("step") == "surface" and not open_file:
+            extra_env["LEGAMI_NEW_SURFACE"] = "1"
         cfg = self.cfg
         creds = self._creds()
 

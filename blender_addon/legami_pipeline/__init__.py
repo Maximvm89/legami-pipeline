@@ -20,6 +20,8 @@ bl_info = {
     "category": "Pipeline",
 }
 
+import os
+
 import bpy
 
 from . import prefs as _prefs
@@ -27,6 +29,16 @@ from . import operators as _ops
 from . import ui as _ui
 
 _ALL_CLASSES = (_prefs.LegamiPipelinePrefs, *_ops.CLASSES, *_ui.CLASSES)
+
+
+def _surface_startup():
+    """One-shot: scaffold a clean shading scene for a fresh surface task. Runs on
+    a timer so the window/screen are ready before we switch workspaces."""
+    try:
+        _ops.scaffold_surface_scene()
+    except Exception as exc:  # noqa: BLE001
+        print("[Legami] surface scene setup failed:", exc)
+    return None   # don't repeat
 
 
 def register():
@@ -41,6 +53,9 @@ def register():
         description="After publishing a model, render a turntable video to dailies")
     # Add a "Legami" menu to the top menu bar (next to Help).
     bpy.types.TOPBAR_MT_editor_menus.append(_ui.draw_menu)
+    # Fresh surface task: start from a clean, shading-ready scene.
+    if os.environ.get("LEGAMI_NEW_SURFACE"):
+        bpy.app.timers.register(_surface_startup, first_interval=0.1)
 
 
 def unregister():
