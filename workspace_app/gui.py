@@ -429,7 +429,9 @@ class MainWindow(QMainWindow):
         b_delete.clicked.connect(self._delete_review)
         ops.addWidget(b_delete)
         b_export = QPushButton("Export…")
-        b_export.setToolTip("Export the visible items to a dated folder + index.html.")
+        b_export.setToolTip("Gather the visible items' clips + texture sheets into a "
+                            "dated folder (and index.html) and open it — drag the "
+                            "clips from there into SyncSketch.")
         b_export.clicked.connect(self._export_review)
         ops.addWidget(b_export)
         dl.addLayout(ops)
@@ -652,11 +654,14 @@ class MainWindow(QMainWindow):
 
         def done(res):
             self._busy_buttons(False)
+            folder = res["folder_local"]
             self.status.showMessage(
-                f"Exported {res['count']} clip(s) -> {res['folder_local']}")
-            idx = os.path.join(res["folder_local"], "index.html")
-            if os.path.isfile(idx):
-                webbrowser.open("file://" + idx)
+                f"Exported {res['count']} clip(s) -> {folder} "
+                f"(opening folder — drag the clips into SyncSketch)")
+            # Open the folder in Finder/Explorer so the clips can be dragged straight
+            # into SyncSketch; the index.html review sheet is in there too.
+            if os.path.isdir(folder):
+                clipboardmod.reveal(folder)
 
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg="Exporting review…")
