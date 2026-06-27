@@ -214,3 +214,17 @@ def test_generate_from_tree():
     cat = tasks.build_catalog(root)
     assert cat["shot"] == {"SEQ010/SH0010": ["animation"]}
     assert cat["asset"] == {"characters/hero": ["model"]}
+
+
+def test_next_version_uses_history_max_not_count():
+    """Next version comes from the highest published version, ignoring gaps and
+    duplicate records — so it never re-issues an existing number."""
+    task = tasks.new_task("asset", "characters/frankenstein", "model")
+    base = "frankenstein_model"
+    assert tasks.next_version(task, base) == 1  # nothing published yet
+    task["publishes"] = [
+        {"files": [f"x/{base}_v001.blend", f"x/{base}_v001.fbx"]},
+        {"files": [f"x/{base}_v003.blend"]},          # v002 gap
+        {"files": [f"x/{base}_v003.blend"]},          # duplicate v003
+    ]
+    assert tasks.next_version(task, base) == 4         # max(3)+1, not count+1

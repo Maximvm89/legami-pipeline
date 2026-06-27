@@ -60,6 +60,23 @@ def get_task(sftp, remote_root: str, task_id: str) -> dict | None:
     return _load_one(sftp, remote_root, task_id)
 
 
+def next_version(task: dict, base: str, ext: str = ".blend") -> int:
+    """Next publish version for <base>_vNNN<ext>, from the task's publish history
+    (the authoritative record). Highest published version + 1 — so versions stay
+    monotonic no matter which machine publishes or what's synced locally.
+
+    Counting local files (len+1) is unreliable: a missing/unsynced version makes it
+    re-issue an existing number and silently overwrite a publish."""
+    pat = re.compile(re.escape(base) + r"_v(\d+)" + re.escape(ext) + r"$")
+    highest = 0
+    for rec in task.get("publishes") or []:
+        for rel in rec.get("files") or []:
+            m = pat.search(rel)
+            if m:
+                highest = max(highest, int(m.group(1)))
+    return highest + 1
+
+
 def published_files(task: dict, ext: str = ".blend") -> list[dict]:
     """Published files of a given type from the task's history, newest first.
     Each entry: {rel, name, time, by, description}."""

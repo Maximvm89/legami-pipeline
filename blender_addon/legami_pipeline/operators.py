@@ -400,11 +400,31 @@ class LEGAMI_OT_add_locator(bpy.types.Operator):
 
 
 def _next_version(folder: str, base: str) -> int:
+    """Local fallback: highest <base>_vNNN.blend on disk + 1. Uses the max version
+    number, not a file count, so a missing version never collides."""
+    import re
     if not os.path.isdir(folder):
         return 1
-    existing = [f for f in os.listdir(folder)
-                if f.startswith(base + "_v") and f.endswith(".blend")]
-    return len(existing) + 1
+    pat = re.compile(re.escape(base) + r"_v(\d+)\.blend$")
+    highest = 0
+    for f in os.listdir(folder):
+        m = pat.search(f)
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return highest + 1
+
+
+def _server_next_version(task_id: str, base: str) -> int | None:
+    """Authoritative next version from the task's server publish history (via the
+    toolkit). None if the toolkit/server isn't reachable, so we fall back to local."""
+    cmd, td = _toolkit_cmd(["next-version", "--task", task_id])
+    if cmd is None:
+        return None
+    try:
+        out = subprocess.check_output(cmd, cwd=td, text=True).strip()
+        return int(out.splitlines()[-1])
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _export_fbx(filepath: str, use_selection: bool = False) -> bool:
@@ -512,7 +532,8 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         os.makedirs(publish_dir, exist_ok=True)
         name = task["entity"].split("/")[-1]
         base = f"{name}_{task['step']}"
-        version = _next_version(publish_dir, base)
+        # Server history is authoritative; fall back to local max if unreachable.
+        version = _server_next_version(task["id"], base) or _next_version(publish_dir, base)
         pub_path = os.path.join(publish_dir, f"{base}_v{version:03d}.blend")
 
         bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)

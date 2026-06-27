@@ -240,6 +240,23 @@ def cmd_publish(args) -> int:
     return 0
 
 
+def cmd_next_version(args) -> int:
+    """Print the next publish version for a task (from its server history). Used by
+    the Blender add-on so versions stay monotonic across machines."""
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import tasks as T
+    with SFTPClient(creds) as client:
+        task = T.get_task(client, cfg.remote_root, args.task)
+    if not task:
+        print(f"error: task not found: {args.task}", file=sys.stderr)
+        return 1
+    name = task["entity"].split("/")[-1]
+    base = f"{name}_{task['step']}"
+    print(T.next_version(task, base))
+    return 0
+
+
 def cmd_turntable(args) -> int:
     cfg = ProjectConfig.load(args.config)
     if not args.dry_run and not os.path.isfile(args.model):
@@ -591,6 +608,11 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--description", default="",
                     help="publish notes recorded in the task history")
     pb.set_defaults(func=cmd_publish)
+
+    nv = sub.add_parser("next-version", parents=[common],
+                        help="print the next publish version for a task")
+    nv.add_argument("--task", required=True, help="task id")
+    nv.set_defaults(func=cmd_next_version)
 
     tt = sub.add_parser("turntable", parents=[common],
                         help="render a model turntable and publish it to 07_dailies")
