@@ -251,3 +251,20 @@ def test_publish_task_refuses_to_overwrite_existing_version():
     assert rels and rels[0].endswith("frank_model_v002.blend")
     reloaded = tasks.get_task(s, "/r", t["id"])
     assert tasks.published_versions(reloaded) == {1, 2}
+
+
+def test_sequences_from_tasks():
+    ts = [
+        tasks.new_task("shot", "SEQ010/SH0010", "animation"),
+        tasks.new_task("shot", "SEQ010/SH0020", "layout"),
+        tasks.new_task("shot", "SEQ020/SH0010", "comp"),
+        tasks.new_task("asset", "characters/frank", "model"),  # ignored
+    ]
+    assert tasks.sequences_from_tasks(ts) == ["SEQ010", "SEQ020"]
+    assert tasks.sequences_from_tasks([]) == []
+
+
+def test_new_task_distinct_ids_per_step():
+    ids = {tasks.new_task("shot", "SEQ010/SH0010", s)["id"]
+           for s in ("layout", "animation", "lighting")}
+    assert len(ids) == 3   # multi-step creation yields distinct tasks

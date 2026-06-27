@@ -275,6 +275,18 @@ def set_status(sftp, remote_root: str, task_id: str, status: str,
     return save_task(sftp, remote_root, t, actor)
 
 
+def sequences_from_tasks(task_list: list[dict]) -> list[str]:
+    """Sorted, unique sequence codes from shot-type tasks (the '<seq>/<shot>'
+    entity's first segment). Feeds the New Shot dialog's sequence dropdown."""
+    seqs = set()
+    for t in task_list or []:
+        if t.get("type") == "shot":
+            seq = (t.get("entity") or "").split("/")[0]
+            if seq:
+                seqs.add(seq)
+    return sorted(seqs)
+
+
 def build_catalog(root) -> dict:
     """Catalog of valid entities and steps that actually exist in the project:
     {"shot": {entity: [steps]}, "asset": {entity: [steps]}}. Used to populate

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from animpipe.config import ProjectConfig, SFTPCredentials, CACHED_CONFIG
 from animpipe.sftp import SFTPClient
 from animpipe import tasks as tasksmod
+from animpipe import schema as schema_mod
 from animpipe import review as reviewmod
 from animpipe import clipboard as clipboardmod
 from animpipe import bugreport
@@ -313,13 +314,16 @@ class MainWindow(QMainWindow):
         self.ed_search.setMinimumWidth(220)
         controls.addWidget(self.ed_search, 1)
         controls.addStretch(0)
-        b_new = QPushButton("New task…")
-        b_new.clicked.connect(self._new_task)
+        b_new_asset = QPushButton("New Asset…")
+        b_new_asset.clicked.connect(self._new_asset)
+        b_new_shot = QPushButton("New Shot…")
+        b_new_shot.clicked.connect(self._new_shot)
         b_gen = QPushButton("Generate from structure")
         b_gen.clicked.connect(self._generate_tasks)
         b_reload = QPushButton("Refresh")
         b_reload.clicked.connect(self._load_tasks)
-        controls.addWidget(b_new)
+        controls.addWidget(b_new_asset)
+        controls.addWidget(b_new_shot)
         controls.addWidget(b_gen)
         controls.addWidget(b_reload)
         tl.addLayout(controls)
@@ -1253,31 +1257,58 @@ class MainWindow(QMainWindow):
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg="Fetching version + launching Blender…")
 
-    def _new_task(self):
+    def _new_asset(self):
         if not self.cfg:
             return
-        schema = self.cfg.schema
-        spec = {
-            "asset_categories": tasksmod.asset_categories(schema),
-            "asset_steps": tasksmod.steps_for(schema, "asset"),
-            "shot_steps": tasksmod.steps_for(schema, "shot"),
-            "naming": self.cfg.naming or {},
-        }
-        dlg = NewTaskDialog(spec, self)
+        dlg = NewAssetDialog(self.cfg.schema, self.cfg.naming or {}, self)
         if dlg.exec() != QDialog.Accepted:
             return
-        data = dlg.values()
+        v = dlg.values()
+        paths = schema_mod.asset_paths(self.cfg.schema, self.cfg.remote_root,
+                                       v["category"], v["name"])
+        self._create_entity("asset", v["entity"], v["steps"], paths)
+
+    def _new_shot(self):
+        if not self.cfg:
+            return
+        existing = tasksmod.sequences_from_tasks(self._tasks)
+        dlg = NewShotDialog(self.cfg.schema, self.cfg.naming or {}, existing, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        v = dlg.values()
+        paths = schema_mod.shot_paths(self.cfg.schema, self.cfg.remote_root,
+                                      v["seq"], v["shot"])
+        self._create_entity("shot", v["entity"], v["steps"], paths)
+
+    def _create_entity(self, ttype: str, entity: str, steps: list, paths: list):
+        """Create the folder structure + one task per step (skipping tasks that
+        already exist), then reload."""
         remote = self.cfg.remote_root
         actor = self._creds_user_safe()
-        task = tasksmod.new_task(data["type"], data["entity"], data["step"],
-                                 title=data["title"] or None)
 
         def work():
-            return self._conn_do(lambda c: tasksmod.save_task(c, remote, task, actor))
+            self._conn_do(lambda c: c.create_all(paths))
+            existing = {t["id"] for t in
+                        self._conn_do(lambda c: tasksmod.load_tasks(c, remote))}
+            created = 0
+            for step in steps:
+                t = tasksmod.new_task(ttype, entity, step)
+                if t["id"] in existing:
+                    continue
+                self._conn_do(lambda c, x=t: tasksmod.save_task(c, remote, x, actor))
+                created += 1
+            return created
+
+        def done(created):
+            self._busy_buttons(False)
+            self._load_tasks()
+            skipped = len(steps) - created
+            extra = f" ({skipped} already existed)" if skipped else ""
+            self.status.showMessage(
+                f"Created {entity}: {created} task(s) + folders{extra}.")
 
         self._busy_buttons(True)
-        self._spawn(work, lambda _r: (self._busy_buttons(False), self._load_tasks()),
-                    busy_msg="Creating task…")
+        self._spawn(work, done, busy_msg=f"Creating {entity}…")
 
     def _delete_task(self, task: dict):
         if not self.cfg:
@@ -1324,114 +1355,176 @@ class MainWindow(QMainWindow):
         self._spawn(work, done, busy_msg="Scanning structure for tasks…")
 
 
-class NewTaskDialog(QDialog):
-    """Type and Step are dropdowns (from the schema); the entity is typed and
-    validated against the project naming convention so names stay consistent."""
-    def __init__(self, spec: dict, parent=None):
+def _steps_group(steps: list[str]) -> tuple[QGroupBox, list]:
+    """A 'Steps' group box with a checkbox per step (all checked by default).
+    Returns (groupbox, [checkboxes])."""
+    box = QGroupBox("Steps (a task is created for each)")
+    grid = QGridLayout(box)
+    boxes = []
+    for i, s in enumerate(steps):
+        cb = QCheckBox(s)
+        cb.setChecked(True)
+        cb._step = s
+        grid.addWidget(cb, i // 3, i % 3)
+        boxes.append(cb)
+    return box, boxes
+
+
+def _checked_steps(boxes: list) -> list[str]:
+    return [cb._step for cb in boxes if cb.isChecked()]
+
+
+class _NewEntityDialog(QDialog):
+    """Shared scaffold: a roomy form + a Steps group + preview/error + buttons."""
+
+    def __init__(self, title: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("New task")
-        self.spec = spec
-        self.naming = spec.get("naming") or {}
-        root = QVBoxLayout(self)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(500)
+        self._root = QVBoxLayout(self)
+        self._root.setSpacing(12)
+        self.form = QFormLayout()
+        self.form.setSpacing(10)
+        self.form.setLabelAlignment(Qt.AlignRight)
+        self._root.addLayout(self.form)
 
-        top = QFormLayout()
-        self.cb_type = QComboBox()
-        self.cb_type.addItems(["shot", "asset"])
-        self.cb_type.currentTextChanged.connect(self._on_type)
-        top.addRow("Type", self.cb_type)
-        root.addLayout(top)
-
-        # Asset inputs: category dropdown + typed name
-        self.asset_box = QWidget()
-        af = QFormLayout(self.asset_box)
-        af.setContentsMargins(0, 0, 0, 0)
-        self.cb_category = QComboBox()
-        self.cb_category.addItems(spec.get("asset_categories") or [])
-        self.ed_asset_name = QLineEdit()
-        self.ed_asset_name.setPlaceholderText(tasksmod.NAMING_HINTS["asset_name"])
-        af.addRow("Category", self.cb_category)
-        af.addRow("Asset name", self.ed_asset_name)
-        root.addWidget(self.asset_box)
-
-        # Shot inputs: sequence + shot codes
-        self.shot_box = QWidget()
-        sf = QFormLayout(self.shot_box)
-        sf.setContentsMargins(0, 0, 0, 0)
-        self.ed_seq = QLineEdit()
-        self.ed_seq.setPlaceholderText(tasksmod.NAMING_HINTS["sequence"])
-        self.ed_shot = QLineEdit()
-        self.ed_shot.setPlaceholderText(tasksmod.NAMING_HINTS["shot"])
-        sf.addRow("Sequence", self.ed_seq)
-        sf.addRow("Shot", self.ed_shot)
-        root.addWidget(self.shot_box)
-
-        bottom = QFormLayout()
-        self.cb_step = QComboBox()
-        self.ed_title = QLineEdit()
-        self.ed_title.setPlaceholderText("(optional)")
-        bottom.addRow("Step", self.cb_step)
-        bottom.addRow("Title", self.ed_title)
-        root.addLayout(bottom)
-
+    def _finish(self, step_boxes):
+        self._step_boxes = step_boxes
+        self.lbl_preview = QLabel("")
+        self.lbl_preview.setStyleSheet("color:#3aa;")
+        self.lbl_preview.setWordWrap(True)
+        self._root.addWidget(self.lbl_preview)
         self.lbl_err = QLabel("")
-        self.lbl_err.setStyleSheet("color:#A32D2D;")
+        self.lbl_err.setStyleSheet("color:#d46a6a;")
         self.lbl_err.setWordWrap(True)
-        root.addWidget(self.lbl_err)
-
+        self._root.addWidget(self.lbl_err)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Create")
         bb.accepted.connect(self._on_ok)
         bb.rejected.connect(self.reject)
-        root.addWidget(bb)
-
-        self._on_type(self.cb_type.currentText())
-
-    def _on_type(self, ttype):
-        is_asset = ttype == "asset"
-        self.asset_box.setVisible(is_asset)
-        self.shot_box.setVisible(not is_asset)
-        self.cb_step.clear()
-        self.cb_step.addItems(self.spec.get(
-            "asset_steps" if is_asset else "shot_steps") or [])
-        self.adjustSize()
-
-    def _on_ok(self):
-        ttype = self.cb_type.currentText()
-        if ttype == "asset":
-            name = self.ed_asset_name.text().strip()
-            if not self.cb_category.currentText():
-                return self._err("Pick an asset category.")
-            if not tasksmod.validate_name(self.naming, "asset_name", name):
-                return self._err("Asset name invalid: "
-                                 + tasksmod.NAMING_HINTS["asset_name"])
-            self._entity = f"{self.cb_category.currentText()}/{name}"
-        else:
-            seq = self.ed_seq.text().strip()
-            shot = self.ed_shot.text().strip()
-            if not tasksmod.validate_name(self.naming, "sequence", seq):
-                return self._err("Sequence invalid: "
-                                 + tasksmod.NAMING_HINTS["sequence"])
-            if not tasksmod.validate_name(self.naming, "shot", shot):
-                return self._err("Shot invalid: " + tasksmod.NAMING_HINTS["shot"])
-            self._entity = f"{seq}/{shot}"
-        if not self.cb_step.currentText():
-            return self._err("Pick a step.")
-        self.accept()
+        self._root.addWidget(bb)
+        self._update_preview()
 
     def _err(self, msg):
         self.lbl_err.setText(msg)
 
+    def _on_ok(self):
+        raise NotImplementedError
+
+    def _update_preview(self):
+        raise NotImplementedError
+
+
+class NewAssetDialog(_NewEntityDialog):
+    """Create an asset: category + name + which steps to make tasks for."""
+
+    def __init__(self, schema: dict, naming: dict, parent=None):
+        super().__init__("New Asset", parent)
+        self.naming = naming or {}
+        self.cb_category = QComboBox()
+        self.cb_category.addItems(tasksmod.asset_categories(schema))
+        self.cb_category.currentTextChanged.connect(self._update_preview)
+        self.ed_name = QLineEdit()
+        self.ed_name.setPlaceholderText(tasksmod.NAMING_HINTS["asset_name"])
+        self.ed_name.textChanged.connect(self._update_preview)
+        self.form.addRow("Category", self.cb_category)
+        self.form.addRow("Asset name", self.ed_name)
+        box, boxes = _steps_group(tasksmod.steps_for(schema, "asset"))
+        for cb in boxes:
+            cb.toggled.connect(self._update_preview)
+        self._root.addWidget(box)
+        self._finish(boxes)
+
+    def _entity(self) -> str:
+        return f"{self.cb_category.currentText()}/{self.ed_name.text().strip()}"
+
+    def _update_preview(self):
+        n = len(_checked_steps(self._step_boxes))
+        self.lbl_preview.setText(
+            f"Will create:  03_assets/{self._entity()}  —  {n} task(s) + folders")
+
+    def _on_ok(self):
+        name = self.ed_name.text().strip()
+        if not self.cb_category.currentText():
+            return self._err("Pick an asset category.")
+        if not tasksmod.validate_name(self.naming, "asset_name", name):
+            return self._err("Asset name invalid — " + tasksmod.NAMING_HINTS["asset_name"])
+        if not _checked_steps(self._step_boxes):
+            return self._err("Select at least one step.")
+        self.accept()
+
     def values(self) -> dict:
-        return {
-            "type": self.cb_type.currentText(),
-            "entity": self._entity,
-            "step": self.cb_step.currentText(),
-            "title": self.ed_title.text().strip(),
-        }
+        return {"type": "asset", "category": self.cb_category.currentText(),
+                "name": self.ed_name.text().strip(), "entity": self._entity(),
+                "steps": _checked_steps(self._step_boxes)}
+
+
+class NewShotDialog(_NewEntityDialog):
+    """Create a shot: pick an existing sequence or type a new one, the shot code,
+    and which steps to make tasks for."""
+
+    def __init__(self, schema: dict, naming: dict, existing_seqs: list[str],
+                 parent=None):
+        super().__init__("New Shot", parent)
+        self.naming = naming or {}
+        self._existing = set(existing_seqs or [])
+        self.cb_seq = QComboBox()
+        self.cb_seq.setEditable(True)
+        self.cb_seq.addItems(sorted(self._existing))
+        self.cb_seq.setCurrentText("")
+        self.cb_seq.lineEdit().setPlaceholderText(tasksmod.NAMING_HINTS["sequence"])
+        self.cb_seq.currentTextChanged.connect(self._update_preview)
+        self.lbl_seq_hint = QLabel("")
+        self.lbl_seq_hint.setStyleSheet("color:#9aa;")
+        self.ed_shot = QLineEdit()
+        self.ed_shot.setPlaceholderText(tasksmod.NAMING_HINTS["shot"])
+        self.ed_shot.textChanged.connect(self._update_preview)
+        self.form.addRow("Sequence", self.cb_seq)
+        self.form.addRow("", self.lbl_seq_hint)
+        self.form.addRow("Shot", self.ed_shot)
+        box, boxes = _steps_group(tasksmod.steps_for(schema, "shot"))
+        for cb in boxes:
+            cb.toggled.connect(self._update_preview)
+        self._root.addWidget(box)
+        self._finish(boxes)
+
+    def _seq(self) -> str:
+        return self.cb_seq.currentText().strip()
+
+    def _entity(self) -> str:
+        return f"{self._seq()}/{self.ed_shot.text().strip()}"
+
+    def _update_preview(self):
+        seq = self._seq()
+        if not seq:
+            self.lbl_seq_hint.setText("")
+        elif seq in self._existing:
+            self.lbl_seq_hint.setText("existing sequence")
+        else:
+            self.lbl_seq_hint.setText("new sequence — will be created")
+        n = len(_checked_steps(self._step_boxes))
+        self.lbl_preview.setText(
+            f"Will create:  04_sequences/{self._entity()}  —  {n} task(s) + folders")
+
+    def _on_ok(self):
+        seq, shot = self._seq(), self.ed_shot.text().strip()
+        if not tasksmod.validate_name(self.naming, "sequence", seq):
+            return self._err("Sequence invalid — " + tasksmod.NAMING_HINTS["sequence"])
+        if not tasksmod.validate_name(self.naming, "shot", shot):
+            return self._err("Shot invalid — " + tasksmod.NAMING_HINTS["shot"])
+        if not _checked_steps(self._step_boxes):
+            return self._err("Select at least one step.")
+        self.accept()
+
+    def values(self) -> dict:
+        return {"type": "shot", "seq": self._seq(),
+                "shot": self.ed_shot.text().strip(), "entity": self._entity(),
+                "steps": _checked_steps(self._step_boxes)}
 
 
 class BugReportDialog(QDialog):
     """Collect a bug report (title + description) and choose what to attach.
-    Mirrors NewTaskDialog. The screenshot was grabbed before this opened."""
+    The screenshot was grabbed before this opened."""
 
     def __init__(self, screenshot, parent=None):
         super().__init__(parent)
