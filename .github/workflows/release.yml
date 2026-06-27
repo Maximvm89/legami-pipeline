@@ -1,0 +1,49 @@
+name: Release
+
+# Push a version tag and GitHub builds the Windows installer and publishes the
+# release automatically:  git tag v0.1.1 && git push origin v0.1.1
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write          # needed to create the GitHub Release
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # full history + tags so build.py's git describe stamps the version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-gui.txt -r requirements-build.txt
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build bundle + installer
+        run: python build.py --installer
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Legami ${{ github.ref_name }}
+          files: dist/Legami-Setup-*.exe
+          fail_on_unmatched_files: true
+          body: |
+            Per-user Windows installer (no admin required).
+
+            Workspace app (tasks, file sync, Dailies review, bug reporter),
+            Blender add-on (project settings, publish, turntable framing/preview),
+            turntable dailies + review folder, review-copy.
+
+            > The installer is **unsigned** — on first run Windows SmartScreen shows
+            > "Windows protected your PC" → **More info → Run anyway**.

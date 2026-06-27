@@ -1,8 +1,29 @@
 # Releasing — Windows installer
 
 How to cut a versioned release and produce the per-user Windows installer
-(`Legami-Setup-<version>.exe`). PyInstaller can't cross-compile, so the **build
-step must run on Windows**, but tagging/publishing can be driven from anywhere.
+(`Legami-Setup-<version>.exe`).
+
+## The easy way: push a tag, CI does the rest (recommended)
+
+`.github/workflows/release.yml` builds the installer on a Windows runner and
+publishes the GitHub Release automatically whenever you push a `v*` tag — no
+Windows machine, no manual upload:
+
+```bash
+git tag -a v0.1.1 -m "Legami v0.1.1"
+git push origin v0.1.1
+```
+
+Then watch **Actions** (or `gh run watch`); when it's green the installer is on the
+**Releases** page. The manual steps below are only needed if you want to build
+locally or CI is unavailable.
+
+---
+
+## Manual build (fallback)
+
+PyInstaller can't cross-compile, so a manual **build step must run on Windows**;
+tagging/publishing can be driven from anywhere.
 
 ## One-time setup on the Windows build machine
 - Python 3.11+ and the repo cloned, with a virtualenv.
