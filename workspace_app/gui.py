@@ -429,9 +429,10 @@ class MainWindow(QMainWindow):
         b_delete.clicked.connect(self._delete_review)
         ops.addWidget(b_delete)
         b_export = QPushButton("Export…")
-        b_export.setToolTip("Gather the visible items' clips + texture sheets into a "
-                            "dated folder (and index.html) and open it — drag the "
-                            "clips from there into SyncSketch.")
+        b_export.setToolTip("Gather the SELECTED items' clips + texture sheets into a "
+                            "fresh dated folder (and index.html) and open it — drag "
+                            "the clips into SyncSketch. With nothing selected, exports "
+                            "all visible items.")
         b_export.clicked.connect(self._export_review)
         ops.addWidget(b_export)
         dl.addLayout(ops)
@@ -636,11 +637,17 @@ class MainWindow(QMainWindow):
     def _export_review(self):
         if not self.cfg:
             return
-        active = {st for st, b in self._review_filter_btns.items() if b.isChecked()}
-        items = [it for it in self._review_items if it["status"] in active]
+        # Export the SELECTED items (so the folder holds only what you'll drag into
+        # SyncSketch); fall back to all visible items if nothing is selected.
+        items = self._selected_review_items()
+        if not items:
+            active = {st for st, b in self._review_filter_btns.items()
+                      if b.isChecked()}
+            items = [it for it in self._review_items if it["status"] in active]
         if not items:
             QMessageBox.information(self, "Nothing to export",
-                                    "No visible items to export.")
+                                    "Select the review(s) to export, or show some "
+                                    "with the status filters.")
             return
         date_str = reviewmod.today_str()
         remote = self.cfg.remote_root

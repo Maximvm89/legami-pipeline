@@ -145,6 +145,37 @@ def test_delete_review_removes_media_and_clears_record():
     assert rec["files"] == ["…/frankenstein_surface_black_white_v004.blend"]
 
 
+def test_write_review_folder_holds_only_this_export(tmp_path):
+    import os
+    from test_tasks import FakeSrv
+    s = FakeSrv()
+    local_root = str(tmp_path)
+
+    def item(name):
+        rel = f"07_dailies/characters/x/model/{name}_turntable.mp4"
+        p = os.path.join(local_root, *rel.split("/"))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").write("vid")
+        return {"source": rel, "clip": f"{name}_turntable.mp4", "entity": "x",
+                "step": "model", "version": name, "status": "to_review",
+                "by": "m", "time": 1, "task_id": "t", "description": ""}
+
+    a, b = item("a_v1"), item("b_v1")
+    folder = os.path.join(local_root, "07_dailies", "_reviews", "2026-06-27")
+    mp4s = lambda: {f for f in os.listdir(folder) if f.endswith(".mp4")}
+
+    R.write_review_folder(s, remote_root="/r", local_root=local_root,
+                          items=[a, b], date_str="2026-06-27", username="m")
+    assert mp4s() == {"a_v1_turntable.mp4", "b_v1_turntable.mp4"}
+
+    # re-export only one -> the folder holds ONLY that one (no accumulation)
+    R.write_review_folder(s, remote_root="/r", local_root=local_root,
+                          items=[a], date_str="2026-06-27", username="m")
+    assert mp4s() == {"a_v1_turntable.mp4"}
+    # and the stale one is gone from the server too
+    assert not any("b_v1_turntable.mp4" in k for k in s.files)
+
+
 def test_render_index_html_lists_items_and_status():
     manifest = R.build_manifest([
         {"entity": "characters/frankenstein", "step": "model",

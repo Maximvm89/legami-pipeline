@@ -236,6 +236,25 @@ def write_review_folder(sftp, *, remote_root: str, local_root: str,
         return result
 
     os.makedirs(review_local, exist_ok=True)
+    # Start fresh so the folder holds ONLY this export — otherwise it accumulates
+    # clips from earlier exports (and the SyncSketch drag folder fills with extras).
+    for f in os.listdir(review_local):
+        fp = os.path.join(review_local, f)
+        if os.path.isfile(fp):
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+    try:
+        for e in sftp.listdir(remote_root.rstrip("/") + "/" + review_rel):
+            if not e.get("is_dir"):
+                try:
+                    sftp.remove(remote_root.rstrip("/") + "/" + review_rel
+                                + "/" + e["name"])
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception:  # noqa: BLE001 — folder may not exist yet
+        pass
     uploaded = []
     for item in items:
         src_rel = item["source"]
