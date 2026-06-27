@@ -53,13 +53,42 @@ def _version() -> str:
 
 def _find_iscc() -> str | None:
     """Locate the Inno Setup command-line compiler (Windows only)."""
-    found = shutil.which("ISCC")
-    if found:
-        return found
-    for base in (os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-                 os.environ.get("ProgramFiles", r"C:\Program Files")):
-        for ver in ("Inno Setup 6", "Inno Setup 5"):
-            cand = os.path.join(base, ver, "ISCC.exe")
+    import glob
+
+    # 1. Explicit override.
+    override = os.environ.get("LEGAMI_ISCC")
+    if override and os.path.isfile(override):
+        return override
+    # 2. On PATH.
+    for name in ("ISCC", "iscc"):
+        found = shutil.which(name)
+        if found:
+            return found
+    # 3. Registry — Inno Setup records its install dir under its uninstall key
+    #    (HKLM for all-users, HKCU for a per-user install).
+    try:
+        import winreg
+        keys = (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 5_is1")
+        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for key in keys:
+                try:
+                    with winreg.OpenKey(root, key) as k:
+                        loc = winreg.QueryValueEx(k, "InstallLocation")[0]
+                    cand = os.path.join(loc, "ISCC.exe")
+                    if os.path.isfile(cand):
+                        return cand
+                except OSError:
+                    continue
+    except ImportError:
+        pass
+    # 4. Default install folders (glob copes with the version in the folder name).
+    bases = [os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+             os.environ.get("ProgramFiles", r"C:\Program Files"),
+             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")]
+    for base in filter(None, bases):
+        for cand in glob.glob(os.path.join(base, "Inno Setup*", "ISCC.exe")):
             if os.path.isfile(cand):
                 return cand
     return None
@@ -73,10 +102,18 @@ def _make_installer(version: str) -> int:
         return 1
     iscc = _find_iscc()
     if not iscc:
-        print("error: Inno Setup not found. Install it from https://jrsoftware.org/"
-              "isdl.php (or 'winget install JRSoftware.InnoSetup'), then re-run.",
+        print("error: Inno Setup (ISCC.exe) not found.\n"
+              "  Install it:  winget install JRSoftware.InnoSetup\n"
+              "  (or download from https://jrsoftware.org/isdl.php)\n"
+              "  If it's installed somewhere custom, set LEGAMI_ISCC to the full "
+              "path of ISCC.exe and re-run.\n"
+              "  The bundle in dist\\Legami\\ is already built — you can also compile "
+              "the installer directly:\n"
+              "    \"C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe\" "
+              "/DAppVersion=0.1.0 packaging\\legami.iss",
               file=sys.stderr)
         return 1
+    print(f"Using Inno Setup: {iscc}")
     iss = os.path.join(ROOT, "packaging", "legami.iss")
     _run([iscc, f"/DAppVersion={version.lstrip('v')}", iss])
     out = os.path.join(ROOT, "dist", f"Legami-Setup-{version.lstrip('v')}.exe")
