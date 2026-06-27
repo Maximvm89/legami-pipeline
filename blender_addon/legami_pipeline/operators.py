@@ -1102,6 +1102,11 @@ class LEGAMI_OT_apply_look(bpy.types.Operator):
             return None
 
     def _append_materials(self, blend):
+        # If the look IS the currently-open file (e.g. you opened the look library
+        # itself), Blender can't append from it — its materials are already here.
+        if (bpy.data.filepath
+                and os.path.abspath(blend) == os.path.abspath(bpy.data.filepath)):
+            return {m.name: m for m in bpy.data.materials}
         # Map ORIGINAL name -> appended datablock, so a name clash with an existing
         # scene material (renamed to .001 on append) doesn't break assignment.
         names = []

@@ -1191,7 +1191,8 @@ class MainWindow(QMainWindow):
         if not t:
             return
         menu = QMenu(self)
-        pubs = tasksmod.published_files(t)
+        # Surface publishes are look libraries (no scene) — not openable as workfiles.
+        pubs = [] if t.get("step") == "surface" else tasksmod.published_files(t)
         act_open = menu.addAction("Open in Blender (latest)")
         ver_menu = menu.addMenu("Open version")
         ver_actions = {}
@@ -1243,11 +1244,14 @@ class MainWindow(QMainWindow):
         remote_root = self.cfg.remote_root
         work_abs = os.path.join(local_root, *tasksmod.task_work_rel(task).split("/"))
 
+        # A surface publish is a materials-only LOOK library (no scene) — opening it
+        # gives Blender's "Library file, loading empty scene", and worse, applying a
+        # look from within it fails ("Cannot load from the current blend file"). So a
+        # surface task NEVER opens a publish (even a chosen version): fall through to
+        # the work file or a fresh shading scene. Looks are consumed via 'Apply look…'.
+        if task.get("step") == "surface":
+            blend_rel = None
         # Open priority: chosen version > latest published > latest local work file.
-        # Surface publishes a materials-only LOOK library (no scene) — opening it
-        # gives Blender's "Library file, loading empty scene". So for surface, never
-        # auto-open the publish: fall through to the work file (or a fresh shading
-        # scene). Use 'Apply look…' in another task to consume a look.
         if blend_rel is None and task.get("step") != "surface":
             pubs = tasksmod.published_files(task)
             blend_rel = pubs[0]["rel"] if pubs else None
