@@ -46,6 +46,24 @@ def texture_entry(src_path: str, name: str, width: int, height: int,
     }
 
 
+_FORMAT_BY_EXT = {
+    ".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".exr": "OPEN_EXR",
+    ".tif": "TIFF", ".tiff": "TIFF", ".tga": "TARGA", ".bmp": "BMP",
+}
+
+
+def format_for_ext(ext: str) -> str | None:
+    """Blender image file_format enum for a file extension, or None to leave the
+    image's current format alone."""
+    return _FORMAT_BY_EXT.get((ext or "").lower())
+
+
+def udim_stem(name: str) -> str:
+    """The stem of a UDIM image name, dropping the '.<UDIM>.<ext>' tail, e.g.
+    'Frank_BaseColor.<UDIM>.png' -> 'Frank_BaseColor'."""
+    return name.split(".<UDIM>")[0]
+
+
 def build_manifest(entries: list[dict], base: str, version: int) -> dict:
     """The <base>_vNNN.manifest.json payload: the publish identity plus every
     texture it carries, sorted by name for stable diffs."""

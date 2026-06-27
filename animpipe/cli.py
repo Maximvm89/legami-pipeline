@@ -284,6 +284,60 @@ def cmd_fetch_publish(args) -> int:
     return 0
 
 
+def cmd_list_looks(args) -> int:
+    """Print the named looks a surface task has published, as JSON. Feeds the
+    Blender 'Apply look' dropdown."""
+    import json
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import tasks as T
+    with SFTPClient(creds) as client:
+        task = T.get_task(client, cfg.remote_root, args.task)
+        if not task:
+            print(f"error: task not found: {args.task}", file=sys.stderr)
+            return 1
+        looks = T.published_looks(task)
+    print(json.dumps(looks))
+    return 0
+
+
+def cmd_fetch_look(args) -> int:
+    """Download a published look (its .blend + manifest + textures/) into the local
+    mirror and print the local .blend path. Used by 'Apply look' so downstream can
+    append the materials with their textures resolving relative to the .blend."""
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import tasks as T
+    remote_root = cfg.remote_root.rstrip("/")
+    local_root = cfg.resolved_local_root() or os.getcwd()
+    with SFTPClient(creds) as client:
+        task = T.get_task(client, cfg.remote_root, args.task)
+        if not task:
+            print(f"error: task not found: {args.task}", file=sys.stderr)
+            return 1
+        sel = next((l for l in T.published_looks(task) if l["look"] == args.look),
+                   None)
+        if not sel:
+            print(f"error: no look '{args.look}' for {args.task}", file=sys.stderr)
+            return 1
+        blend_rel, manifest_rel = sel["blend_rel"], sel["manifest_rel"]
+        local_blend = os.path.join(local_root, *blend_rel.split("/"))
+        client.download(remote_root + "/" + blend_rel, local_blend)
+        client.download(remote_root + "/" + manifest_rel,
+                        os.path.join(local_root, *manifest_rel.split("/")))
+        # The look's textures live in <publish>/textures and are referenced
+        # relatively, so they must sit beside the fetched .blend.
+        pub_dir = blend_rel.rsplit("/", 1)[0]
+        try:
+            client.download_dir(remote_root + "/" + pub_dir + "/textures",
+                                os.path.join(local_root, *pub_dir.split("/"),
+                                             "textures"))
+        except Exception:  # noqa: BLE001 — a look may carry no textures
+            pass
+    print(local_blend)
+    return 0
+
+
 def cmd_next_version(args) -> int:
     """Print the next publish version for a task (from its server history). Used by
     the Blender add-on so versions stay monotonic across machines."""
@@ -295,8 +349,9 @@ def cmd_next_version(args) -> int:
     if not task:
         print(f"error: task not found: {args.task}", file=sys.stderr)
         return 1
-    name = task["entity"].split("/")[-1]
-    base = f"{name}_{task['step']}"
+    # --base lets the caller version a sub-variant (e.g. a named surface look,
+    # '<asset>_surface_<look>') independently of the task's default base.
+    base = args.base or f"{task['entity'].split('/')[-1]}_{task['step']}"
     print(T.next_version(task, base))
     return 0
 
@@ -547,9 +602,22 @@ def build_parser() -> argparse.ArgumentParser:
                                    "(default: local mirror of the publish folder)")
     fp.set_defaults(func=cmd_fetch_publish)
 
+    ll = sub.add_parser("list-looks", parents=[common],
+                        help="list a surface task's published looks (JSON)")
+    ll.add_argument("--task", required=True, help="surface task id")
+    ll.set_defaults(func=cmd_list_looks)
+
+    fl = sub.add_parser("fetch-look", parents=[common],
+                        help="download a published look (.blend + manifest + textures)")
+    fl.add_argument("--task", required=True, help="surface task id")
+    fl.add_argument("--look", required=True, help="look name to fetch")
+    fl.set_defaults(func=cmd_fetch_look)
+
     nv = sub.add_parser("next-version", parents=[common],
                         help="print the next publish version for a task")
     nv.add_argument("--task", required=True, help="task id")
+    nv.add_argument("--base", help="version this base name instead of the task "
+                                   "default (e.g. a named surface look)")
     nv.set_defaults(func=cmd_next_version)
 
     tt = sub.add_parser("turntable", parents=[common],

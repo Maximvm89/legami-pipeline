@@ -20,6 +20,10 @@ class LEGAMI_MT_menu(bpy.types.Menu):
             # Surface/rig depend on the published model — pull it in to work on.
             if task.get("step") in ("surface", "rig"):
                 layout.operator("legami.load_model", icon="IMPORT")
+            # Re-apply a published look onto the character (rig and beyond).
+            if task.get("type") == "asset" and task.get("step") != "model":
+                layout.operator("legami.apply_look", text="Apply look…",
+                                icon="MATERIAL")
             layout.operator("legami.save_to_task", icon="FILE_TICK")
             layout.operator("legami.run_checks", icon="CHECKMARK")
             layout.operator("legami.publish", text="Publish…", icon="EXPORT")

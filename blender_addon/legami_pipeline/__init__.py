@@ -51,6 +51,10 @@ def register():
     bpy.types.WindowManager.legami_render_turntable = bpy.props.BoolProperty(
         name="Render turntable", default=True,
         description="After publishing a model, render a turntable video to dailies")
+    bpy.types.WindowManager.legami_look_name = bpy.props.StringProperty(
+        name="Look", default="default",
+        description="Name of this look variant (e.g. default, damaged) — each "
+                    "name versions independently and is selectable downstream")
     # Add a "Legami" menu to the top menu bar (next to Help).
     bpy.types.TOPBAR_MT_editor_menus.append(_ui.draw_menu)
     # Fresh surface task: start from a clean, shading-ready scene.
@@ -62,6 +66,7 @@ def unregister():
     bpy.types.TOPBAR_MT_editor_menus.remove(_ui.draw_menu)
     del bpy.types.WindowManager.legami_publish_desc
     del bpy.types.WindowManager.legami_render_turntable
+    del bpy.types.WindowManager.legami_look_name
     for cls in reversed(_ALL_CLASSES):
         bpy.utils.unregister_class(cls)
 

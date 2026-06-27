@@ -270,6 +270,32 @@ def test_new_task_distinct_ids_per_step():
     assert len(ids) == 3   # multi-step creation yields distinct tasks
 
 
+def test_published_looks_latest_per_name():
+    t = tasks.new_task("asset", "characters/frankenstein", "surface")
+    pub = "03_assets/characters/frankenstein/surface/publish/"
+    t["publishes"] = [
+        {"files": [pub + "frankenstein_surface_default_v001.blend",
+                   pub + "frankenstein_surface_default_v001.manifest.json"],
+         "time": 1, "by": "marco"},
+        {"files": [pub + "frankenstein_surface_default_v002.blend"],
+         "time": 2, "by": "marco"},
+        {"files": [pub + "frankenstein_surface_damaged_v001.blend"],
+         "time": 3, "by": "anna"},
+    ]
+    looks = tasks.published_looks(t)
+    assert [(l["look"], l["version"]) for l in looks] == [
+        ("damaged", 1), ("default", 2)]              # latest per look, sorted by name
+    default = next(l for l in looks if l["look"] == "default")
+    assert default["blend_rel"] == pub + "frankenstein_surface_default_v002.blend"
+    assert default["manifest_rel"] == \
+        pub + "frankenstein_surface_default_v002.manifest.json"
+
+
+def test_published_looks_empty():
+    t = tasks.new_task("asset", "characters/frankenstein", "surface")
+    assert tasks.published_looks(t) == []
+
+
 def test_model_task_id_is_sibling():
     # The surface task's model sibling is the same entity at the 'model' step.
     surf = tasks.new_task("asset", "characters/hero", "surface")

@@ -112,6 +112,33 @@ def published_files(task: dict, ext: str = ".blend") -> list[dict]:
     return out
 
 
+def published_looks(task: dict) -> list[dict]:
+    """Named looks a surface task has published, latest version of each. A look
+    file is '<asset>_surface_<look>_vNNN.blend'; the look name is parsed against the
+    task's own asset name so underscores in either name stay unambiguous. Returns
+    [{look, version, blend_rel, manifest_rel, time, by, description}] sorted by name.
+    Feeds the downstream 'Apply look' dropdown."""
+    import os as _os
+    asset = (task.get("entity") or "").split("/")[-1]
+    pat = re.compile(re.escape(asset) + r"_surface_(.+)_v(\d+)\.blend$")
+    best: dict[str, dict] = {}
+    for rec in task.get("publishes") or []:
+        for rel in rec.get("files") or []:
+            m = pat.search(_os.path.basename(rel))
+            if not m:
+                continue
+            look, ver = m.group(1), int(m.group(2))
+            cur = best.get(look)
+            if cur is None or ver > cur["version"]:
+                best[look] = {
+                    "look": look, "version": ver, "blend_rel": rel,
+                    "manifest_rel": rel[:-len(".blend")] + ".manifest.json",
+                    "time": rec.get("time"), "by": rec.get("by"),
+                    "description": rec.get("description", ""),
+                }
+    return [best[k] for k in sorted(best)]
+
+
 def publish_task(sftp, remote_root: str, username: str, local_files,
                  task_id: str, status: str = "review",
                  description: str = "", texture_files=None) -> list[str] | None:
@@ -147,7 +174,13 @@ def publish_task(sftp, remote_root: str, username: str, local_files,
         sftp.upload(f, remote_root.rstrip("/") + "/" + rel)
         rels.append(rel)
     for f in texture_files or []:
-        rel = task_dir_rel(task) + "/publish/textures/" + _os.path.basename(f)
+        # Preserve the texture's path under publish/ (e.g. a per-version subfolder
+        # 'textures/<base>_vNNN/<tile>.png') so published looks stay immutable —
+        # a new publish never overwrites a prior version's textures.
+        norm = f.replace("\\", "/")
+        sub = (norm.split("/publish/", 1)[1] if "/publish/" in norm
+               else "textures/" + _os.path.basename(f))
+        rel = task_dir_rel(task) + "/publish/" + sub
         sftp.upload(f, remote_root.rstrip("/") + "/" + rel)
         rels.append(rel)
     ledger.record_uploads(sftp, remote_root, username, rels)

@@ -2,7 +2,6 @@
 
 import json
 import os
-import shutil
 import subprocess
 import types
 
@@ -11,6 +10,7 @@ import bpy
 from . import settings_io
 from . import checks
 from . import textures
+from . import look as look_mod
 
 
 def _prefs():
@@ -328,11 +328,11 @@ def active_publish_locator():
     return bpy.data.objects.get(publish_locator_name())
 
 
-def _used_file_images():
-    """Images with an external source file that are actually used (have users).
-    These are the textures a surface look depends on."""
+def _used_texture_images():
+    """Image textures actually used (have users): plain files, UDIM tilesets, and
+    sequences. These are the textures a surface look depends on."""
     return [img for img in bpy.data.images
-            if getattr(img, "source", "") == "FILE"
+            if getattr(img, "source", "") in ("FILE", "TILED", "SEQUENCE")
             and getattr(img, "users", 0) > 0]
 
 
@@ -342,17 +342,102 @@ def _image_src(img):
     return bpy.path.abspath(fp) if fp else ""
 
 
+def _image_missing(img):
+    """A used texture is 'missing' if it isn't packed and has no file on disk —
+    publishing it would ship a dead path. UDIM tilesets check their first tile."""
+    if getattr(img, "packed_file", None):
+        return False
+    src = _image_src(img)
+    if not src:
+        return True
+    if getattr(img, "source", "") == "TILED":
+        tiles = list(getattr(img, "tiles", []) or [])
+        n = tiles[0].number if tiles else 1001
+        return not os.path.isfile(src.replace("<UDIM>", str(n)))
+    return not os.path.isfile(src)
+
+
 def _texture_check_records():
-    """Lightweight records for checks.check_surface: a used texture is missing if
-    it's not packed and its source file isn't on disk (publishing it would ship a
-    dead path). Kept as plain namespaces so checks.py stays bpy-free."""
-    recs = []
-    for img in _used_file_images():
-        packed = bool(getattr(img, "packed_file", None))
-        src = _image_src(img)
-        missing = (not packed) and (not src or not os.path.isfile(src))
-        recs.append(types.SimpleNamespace(name=img.name, is_missing=missing))
-    return recs
+    """Lightweight records for checks.check_surface (plain namespaces so checks.py
+    stays bpy-free)."""
+    return [types.SimpleNamespace(name=img.name, is_missing=_image_missing(img))
+            for img in _used_texture_images()]
+
+
+def _materialize_look_textures(textures_dir):
+    """Write every used texture into textures_dir as external file(s) — UDIM tiles
+    via the '<UDIM>' token, plain/packed images as single files — repointing each
+    image there so a subsequent libraries.write(path_remap='RELATIVE') bakes a
+    '//textures/…' path. Returns (written_paths, manifest_entries, restore), where
+    restore() puts the artist's session images back (re-packing those that were
+    packed) so publishing is non-destructive."""
+    os.makedirs(textures_dir, exist_ok=True)
+    originals = {}     # img -> (orig filepath_raw, was_packed, external target)
+    entries, written = [], []
+    for img in _used_texture_images():
+        was_packed = bool(getattr(img, "packed_file", None))
+        raw = getattr(img, "filepath_raw", "") or img.filepath
+        ext = (os.path.splitext(raw)[1] or os.path.splitext(img.name)[1] or ".png")
+        cs = getattr(getattr(img, "colorspace_settings", None), "name", "")
+        if getattr(img, "source", "") == "TILED":
+            target = os.path.join(textures_dir,
+                                  f"{textures.udim_stem(img.name)}.<UDIM>{ext}")
+            img.filepath_raw = target
+            _set_image_format(img, ext)
+            img.save()
+            files = [target.replace("<UDIM>", str(t.number)) for t in img.tiles]
+        else:
+            stem = os.path.splitext(os.path.basename(img.name))[0]
+            target = os.path.join(textures_dir, f"{stem}{ext}")
+            img.filepath_raw = target
+            _set_image_format(img, ext)
+            img.save()
+            files = [target]
+        if was_packed:
+            try:
+                img.unpack(method="REMOVE")   # drop the packed copy; keep external
+            except Exception:  # noqa: BLE001
+                pass
+        originals[img] = (raw, was_packed, target)
+        w, h = (list(getattr(img, "size", [0, 0])) + [0, 0])[:2]
+        for f in files:
+            if os.path.isfile(f):
+                written.append(f)
+                entries.append(textures.texture_entry(
+                    f, os.path.basename(f), w, h, cs, textures.sha1_file(f)))
+
+    def restore():
+        for img, (raw, was_packed, target) in originals.items():
+            try:
+                if was_packed:               # re-embed from the identical external
+                    img.filepath_raw = target
+                    img.pack()
+                img.filepath_raw = raw       # and restore the original reference
+            except Exception:  # noqa: BLE001
+                pass
+
+    return written, entries, restore
+
+
+def _set_image_format(img, ext):
+    fmt = textures.format_for_ext(ext)
+    if fmt:
+        try:
+            img.file_format = fmt
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _collect_look(context):
+    """The materials to publish as a look + the mesh→material assignment map, taken
+    from the geometry under the PUBLISH locator."""
+    loc = bpy.data.objects.get(publish_locator_name())
+    pool = (_descendants(loc) if loc is not None else list(context.scene.objects))
+    meshes = [o for o in pool if getattr(o, "type", "") == "MESH"]
+    amap = look_mod.assignment_map(meshes)
+    materials = {s.material for o in meshes
+                 for s in getattr(o, "material_slots", []) or [] if s.material}
+    return materials, amap
 
 
 def _run_task_checks(step, context):
@@ -360,45 +445,6 @@ def _run_task_checks(step, context):
     extra = _texture_check_records() if step == "surface" else None
     return checks.run_checks(step, context.scene, list(context.scene.objects),
                              publish_locator_name(), textures=extra)
-
-
-def _copy_textures_for_publish(publish_dir, base, version):
-    """Copy every external texture into publish_dir/textures/ under a content hash,
-    repoint each image to its absolute copy (so save_as_mainfile(relative_remap)
-    bakes a '//textures/…' path), and build the manifest. Returns
-    (copied_paths, manifest, restore) — restore() puts the artist's original
-    filepaths back so their working session is untouched."""
-    textures_dir = os.path.join(publish_dir, "textures")
-    originals = {}              # img -> original filepath (to restore after saving)
-    entries = {}               # hashed name -> manifest entry (natural dedupe)
-    copied = []
-    for img in _used_file_images():
-        src = _image_src(img)
-        if not src or not os.path.isfile(src):
-            continue           # packed-only/missing: left to the .blend / checks
-        sha = textures.sha1_file(src)
-        stem, ext = os.path.splitext(os.path.basename(src))
-        name = textures.hashed_name(stem, ext, sha)
-        dst = os.path.join(textures_dir, name)
-        if name not in entries:
-            os.makedirs(textures_dir, exist_ok=True)
-            if not os.path.isfile(dst):
-                shutil.copy2(src, dst)
-            copied.append(dst)
-            w, h = (list(getattr(img, "size", [0, 0])) + [0, 0])[:2]
-            cs = getattr(getattr(img, "colorspace_settings", None), "name", "")
-            entries[name] = textures.texture_entry(dst, name, w, h, cs, sha)
-        originals[img] = getattr(img, "filepath_raw", img.filepath)
-        img.filepath = dst     # absolute now; relative_remap fixes it on save
-
-    def restore():
-        for img, fp in originals.items():
-            try:
-                img.filepath = fp
-            except Exception:  # noqa: BLE001
-                pass
-
-    return copied, textures.build_manifest(list(entries.values()), base, version), restore
 
 
 class LEGAMI_OT_turntable_framing(bpy.types.Operator):
@@ -479,7 +525,7 @@ class LEGAMI_OT_add_locator(bpy.types.Operator):
 def _server_next_version(task_id: str, base: str) -> int | None:
     """Authoritative next version from the task's server publish history (via the
     toolkit). None if the toolkit/server isn't reachable, so we fall back to local."""
-    cmd, td = _toolkit_cmd(["next-version", "--task", task_id])
+    cmd, td = _toolkit_cmd(["next-version", "--task", task_id, "--base", base])
     if cmd is None:
         return None
     try:
@@ -560,6 +606,8 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         task = active_task()
         if task and task.get("step") == "model":
             col.prop(context.window_manager, "legami_render_turntable")
+        if task and task.get("step") == "surface":
+            col.prop(context.window_manager, "legami_look_name", text="Look name")
         col.separator()
         _draw_checks(col, self._issues)
         col.separator()
@@ -584,7 +632,15 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         publish_dir = os.path.join(os.path.dirname(task["work_dir"]), "publish")
         os.makedirs(publish_dir, exist_ok=True)
         name = task["entity"].split("/")[-1]
-        base = f"{name}_{task['step']}"
+        # Surface publishes a named look, versioned on its own track; other steps
+        # version by step.
+        look_name = ""
+        if task["step"] == "surface":
+            look_name = look_mod.normalize_look_name(
+                context.window_manager.legami_look_name)
+            base = look_mod.look_base(name, look_name)
+        else:
+            base = f"{name}_{task['step']}"
         # The server publish history is the single source of truth for versions.
         # If we can't reach it, abort rather than guess a number that could collide.
         version = _server_next_version(task["id"], base)
@@ -596,22 +652,27 @@ class LEGAMI_OT_publish(bpy.types.Operator):
 
         texture_files = []
         if task["step"] == "surface":
-            # Surface look: make textures safe (copy beside the .blend, relative
-            # paths), write a manifest, and don't FBX — the deliverable is the
-            # shaded .blend + its textures, loadable anywhere it's synced.
-            copied, manifest, restore = _copy_textures_for_publish(
-                publish_dir, base, version)
+            # A look = the materials only (no geometry) + an assignment map + safe
+            # external textures, so downstream can re-apply it onto the character.
+            materials, amap = _collect_look(context)
+            textures_dir = os.path.join(publish_dir, "textures",
+                                        f"{base}_v{version:03d}")
+            written, tex_entries, restore = _materialize_look_textures(textures_dir)
             try:
-                bpy.ops.wm.save_as_mainfile(
-                    filepath=pub_path, copy=True, relative_remap=True)
+                # Write ONLY the materials; RELATIVE remap bakes '//textures/…' paths.
+                bpy.data.libraries.write(pub_path, materials,
+                                         path_remap="RELATIVE", fake_user=True)
             finally:
                 restore()      # leave the artist's working session untouched
-            manifest_path = pub_path[:-6] + ".manifest.json"   # _vNNN.blend -> .manifest.json
+            manifest = look_mod.build_look_manifest(
+                look_name, version, amap, tex_entries)
+            manifest_path = pub_path[:-6] + ".manifest.json"
             with open(manifest_path, "w") as fh:
                 json.dump(manifest, fh, indent=2)
             files = [pub_path, manifest_path]
-            texture_files = copied
-            kind = f".blend + {len(copied)} texture(s)"
+            texture_files = written
+            kind = f"look '{look_name}': {len(materials)} material(s), " \
+                   f"{len(written)} texture file(s)"
         else:
             bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)
             files = [pub_path]
@@ -832,6 +893,129 @@ class LEGAMI_OT_load_model(bpy.types.Operator):
             o.parent = loc
 
 
+_LOOK_CHOICES = []   # cached list-looks result for the apply dropdown
+
+
+def _apply_look_items(self, context):
+    items = [(l["look"], f"{l['look']}  (v{l['version']:03d})", "")
+             for l in _LOOK_CHOICES]
+    return items or [("", "<no looks published>", "")]
+
+
+class LEGAMI_OT_apply_look(bpy.types.Operator):
+    bl_idname = "legami.apply_look"
+    bl_label = "Apply look"
+    bl_description = ("Fetch a published look for this character and assign its "
+                      "materials onto the meshes by name")
+
+    look: bpy.props.EnumProperty(name="Look", items=_apply_look_items)
+
+    def invoke(self, context, event):
+        task = active_task()
+        if not task or task.get("type") != "asset" or not task.get("entity"):
+            self.report({"ERROR"}, "No active asset task.")
+            return {"CANCELLED"}
+        global _LOOK_CHOICES
+        _LOOK_CHOICES = self._list_looks(look_mod.surface_task_id(task["entity"]))
+        if not _LOOK_CHOICES:
+            self.report({"ERROR"}, "No looks published for this character yet — "
+                                   "publish one from the surface task first.")
+            return {"CANCELLED"}
+        self.look = _LOOK_CHOICES[0]["look"]
+        return context.window_manager.invoke_props_dialog(self, width=320)
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.label(text="Apply a published look to this character:")
+        col.prop(self, "look")
+
+    def execute(self, context):
+        task = active_task()
+        if not task or not task.get("entity") or not self.look:
+            self.report({"ERROR"}, "No look selected.")
+            return {"CANCELLED"}
+        sid = look_mod.surface_task_id(task["entity"])
+        blend = self._fetch_look(sid, self.look)
+        if not blend or not os.path.isfile(blend):
+            self.report({"ERROR"}, "Couldn't fetch the look from the server.")
+            return {"CANCELLED"}
+        try:
+            manifest = json.load(open(blend[:-6] + ".manifest.json"))
+        except Exception:  # noqa: BLE001
+            manifest = {}
+        mats = self._append_materials(blend)
+        assigned, missing = self._assign(manifest.get("assignments", {}), mats)
+        self._dedupe_material_names(mats)
+        msg = f"Applied look '{self.look}': {assigned} mesh(es)"
+        if missing:
+            msg += f", {missing} not found in scene"
+        self.report({"INFO"}, msg)
+        return {"FINISHED"}
+
+    # --- helpers ---------------------------------------------------------
+    def _list_looks(self, surface_id):
+        cmd, td = _toolkit_cmd(["list-looks", "--task", surface_id])
+        if cmd is None:
+            return []
+        try:
+            out = subprocess.check_output(cmd, cwd=td, text=True)
+            return json.loads(out.splitlines()[-1])
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _fetch_look(self, surface_id, look):
+        cmd, td = _toolkit_cmd(
+            ["fetch-look", "--task", surface_id, "--look", look])
+        if cmd is None:
+            return None
+        try:
+            out = subprocess.check_output(cmd, cwd=td, text=True).strip()
+            return out.splitlines()[-1] if out else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _append_materials(self, blend):
+        # Map ORIGINAL name -> appended datablock, so a name clash with an existing
+        # scene material (renamed to .001 on append) doesn't break assignment.
+        names = []
+        with bpy.data.libraries.load(blend, link=False) as (src, dst):
+            names = list(src.materials)          # keep the name strings separate
+            dst.materials = list(src.materials)  # Blender fills this list in place
+        return {nm: mat for nm, mat in zip(names, dst.materials) if mat is not None}
+
+    def _dedupe_material_names(self, mats):
+        """If the clean model brought its own same-named material, the look's
+        appended copy gets a '.001' suffix. Once we've reassigned, the model's copy
+        is orphaned — drop it and let the look's material reclaim the clean name."""
+        for orig_name, mat in mats.items():
+            if mat.name == orig_name:
+                continue
+            old = bpy.data.materials.get(orig_name)
+            if old is not None and old is not mat and old.users == 0:
+                bpy.data.materials.remove(old)
+                try:
+                    mat.name = orig_name
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _assign(self, assignments, mats):
+        assigned = missing = 0
+        for mesh_name, slot_mats in assignments.items():
+            obj = bpy.data.objects.get(mesh_name)
+            if obj is None or obj.type != "MESH":
+                missing += 1
+                continue
+            me = obj.data
+            for i, mname in enumerate(slot_mats):
+                mat = mats.get(mname) if mname else None
+                if i < len(me.materials):
+                    me.materials[i] = mat
+                else:
+                    me.materials.append(mat)
+            assigned += 1
+        return assigned, missing
+
+
 class LEGAMI_OT_preview_turntable(bpy.types.Operator):
     bl_idname = "legami.preview_turntable"
     bl_label = "Preview Turntable Framing"
@@ -872,6 +1056,7 @@ CLASSES = (
     LEGAMI_OT_check,
     LEGAMI_OT_publish,
     LEGAMI_OT_load_model,
+    LEGAMI_OT_apply_look,
     LEGAMI_OT_turntable_framing,
     LEGAMI_OT_preview_turntable,
 )
