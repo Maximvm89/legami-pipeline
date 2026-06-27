@@ -107,6 +107,44 @@ def set_status_on_task(task: dict, turntable_rel: str, status: str) -> bool:
     return hit
 
 
+def delete_review(sftp, remote_root: str, item: dict,
+                  local_root: str | None = None) -> bool:
+    """Delete a review's media — the turntable mp4 and texture sheet — from the
+    server (and the local mirror if `local_root` is given), and clear the
+    turntable/sheet fields from the publish record so it stops being a review item.
+    The published look/model itself is NOT touched. Returns True if the record was
+    found and updated."""
+    import os
+    from . import tasks
+    remote = remote_root.rstrip("/")
+    for rel in (item.get("source"), item.get("sheet")):
+        if not rel:
+            continue
+        try:
+            sftp.remove(remote + "/" + rel)
+        except Exception:  # noqa: BLE001 — already gone is fine
+            pass
+        if local_root:
+            lp = os.path.join(local_root, *rel.split("/"))
+            if os.path.isfile(lp):
+                try:
+                    os.remove(lp)
+                except OSError:
+                    pass
+    task = tasks.get_task(sftp, remote_root, item.get("task_id", ""))
+    if not task:
+        return False
+    hit = False
+    for rec in task.get("publishes") or []:
+        if rec.get("turntable") == item.get("source"):
+            rec.pop("turntable", None)
+            rec.pop("sheet", None)
+            hit = True
+    if hit:
+        tasks.save_task(sftp, remote_root, task)
+    return hit
+
+
 def set_review_status(sftp, remote_root: str, task_id: str, turntable_rel: str,
                       status: str, username: str) -> bool:
     """Load the task, set the item's review status (approved completes the task),

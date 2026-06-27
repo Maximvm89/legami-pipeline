@@ -119,6 +119,32 @@ def test_index_html_shows_sheet_image():
     assert "<img" in html and "x_textures.png" in html and "<video" in html
 
 
+def test_delete_review_removes_media_and_clears_record():
+    s = FakeSrv()
+    t = tasks.new_task("asset", "characters/frankenstein", "surface")
+    tt = ("07_dailies/characters/frankenstein/surface/"
+          "frankenstein_surface_black_white_v004_turntable.mp4")
+    sheet = ("07_dailies/characters/frankenstein/surface/"
+             "frankenstein_surface_black_white_v004_textures.png")
+    t["publishes"] = [{"turntable": tt, "sheet": sheet, "time": 1, "by": "marco",
+                       "files": ["…/frankenstein_surface_black_white_v004.blend"]}]
+    tasks.save_task(s, "/r", t)
+    s.files["/r/" + tt] = "<mp4>"
+    s.files["/r/" + sheet] = "<png>"
+    item = R.review_items([t])[0]
+
+    assert R.delete_review(s, "/r", item) is True
+    # files gone from the server
+    assert "/r/" + tt not in s.files and "/r/" + sheet not in s.files
+    # record no longer a review item
+    reloaded = tasks.get_task(s, "/r", t["id"])
+    rec = reloaded["publishes"][0]
+    assert "turntable" not in rec and "sheet" not in rec
+    assert R.review_items([reloaded]) == []
+    # the published look .blend is untouched
+    assert rec["files"] == ["…/frankenstein_surface_black_white_v004.blend"]
+
+
 def test_render_index_html_lists_items_and_status():
     manifest = R.build_manifest([
         {"entity": "characters/frankenstein", "step": "model",

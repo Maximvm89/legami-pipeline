@@ -423,6 +423,11 @@ class MainWindow(QMainWindow):
         b_sheet.clicked.connect(self._open_review_sheet)
         ops.addWidget(b_sheet)
         ops.addStretch(1)
+        b_delete = QPushButton("Delete review…")
+        b_delete.setToolTip("Delete the selected review's turntable + texture sheet "
+                            "from the server and locally (the published look is kept).")
+        b_delete.clicked.connect(self._delete_review)
+        ops.addWidget(b_delete)
         b_export = QPushButton("Export…")
         b_export.setToolTip("Export the visible items to a dated folder + index.html.")
         b_export.clicked.connect(self._export_review)
@@ -591,6 +596,40 @@ class MainWindow(QMainWindow):
 
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg="Fetching texture sheet…")
+
+    def _delete_review(self):
+        if not self.cfg:
+            return
+        items = self._selected_review_items()
+        if not items:
+            QMessageBox.information(self, "No item selected",
+                                    "Select the review(s) to delete.")
+            return
+        listing = "\n".join(f"  • {it['entity']} · {it['version']}" for it in items)
+        resp = QMessageBox.question(
+            self, "Delete review",
+            f"Delete the review media for {len(items)} item(s)?\n\n{listing}\n\n"
+            "This removes the turntable and texture sheet from the server and your "
+            "local copy. The published look/model is kept. This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if resp != QMessageBox.Yes:
+            return
+        remote = self.cfg.remote_root
+        local_root = self.cfg.resolved_local_root()
+
+        def work():
+            for it in items:
+                self._conn_do(lambda c, x=it: reviewmod.delete_review(
+                    c, remote, x, local_root))
+            return len(items)
+
+        def done(n):
+            self._busy_buttons(False)
+            self.status.showMessage(f"Deleted {n} review(s).")
+            self._load_review_items()
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Deleting review…")
 
     def _export_review(self):
         if not self.cfg:
