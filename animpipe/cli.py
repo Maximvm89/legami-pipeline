@@ -561,6 +561,108 @@ def cmd_review_copy(args) -> int:
     return 0
 
 
+def cmd_assembly_list(args) -> int:
+    """Print a shot's element breakdown as JSON."""
+    import json
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import elements as E
+    with SFTPClient(creds) as client:
+        asm = E.load_assembly(client, cfg.remote_root, args.shot)
+    print(json.dumps(asm["elements"], indent=2))
+    return 0
+
+
+def cmd_assembly_add(args) -> int:
+    """Add an element (an asset, or the shot's own camera) to a shot's breakdown."""
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import elements as E
+    kind = "camera" if args.camera else "asset"
+    if kind == "asset" and not args.asset:
+        print("error: --asset required (or use --camera)", file=sys.stderr)
+        return 1
+    el = E.new_element(args.asset or "", kind, args.label or "", args.look or "")
+    with SFTPClient(creds) as client:
+        asm = E.load_assembly(client, cfg.remote_root, args.shot)
+        E.add_element(asm, el)
+        E.save_assembly(client, cfg.remote_root, args.shot, asm, actor=creds.user)
+    print(f"added {kind} to {args.shot}: {asm['elements'][-1]['id']}")
+    return 0
+
+
+def cmd_assembly_remove(args) -> int:
+    """Remove an element from a shot's breakdown by its id."""
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import elements as E
+    with SFTPClient(creds) as client:
+        asm = E.load_assembly(client, cfg.remote_root, args.shot)
+        before = len(asm["elements"])
+        E.remove_element(asm, args.id)
+        if len(asm["elements"]) == before:
+            print(f"error: no element '{args.id}' in {args.shot}", file=sys.stderr)
+            return 1
+        E.save_assembly(client, cfg.remote_root, args.shot, asm, actor=creds.user)
+    print(f"removed {args.id} from {args.shot}")
+    return 0
+
+
+def cmd_resolve_assembly(args) -> int:
+    """Resolve a shot's elements for a step, download each element's rig/model
+    publish into the local mirror, and print JSON for the Blender add-on to link.
+    The shot is given by --task (a shot task id) or --shot + --step."""
+    import json
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import tasks as T, elements as E, turntable
+    rr = cfg.remote_root.rstrip("/")
+    local_root = cfg.resolved_local_root() or os.getcwd()
+    settings = turntable._load_project_settings(local_root)
+
+    with SFTPClient(creds) as client:
+        if args.task:
+            t = T.get_task(client, rr, args.task)
+            if not t or t.get("type") != "shot":
+                print(f"error: not a shot task: {args.task}", file=sys.stderr)
+                return 1
+            shot_entity, step = t["entity"], (args.step or t["step"])
+        elif args.shot and args.step:
+            shot_entity, step = args.shot, args.step
+        else:
+            print("error: give --task, or both --shot and --step", file=sys.stderr)
+            return 1
+        picks = {}
+        for p in args.pick or []:                    # "id=step" overrides
+            if "=" in p:
+                k, v = p.split("=", 1)
+                picks[k] = v
+        resolved = E.resolved_elements(client, rr, shot_entity, step, settings,
+                                       picks=picks)
+        only = set(args.only or [])
+        out = []
+        for r in resolved:
+            if only and r["id"] not in only:         # --only: just these elements
+                continue
+            rel = r.get("blend_rel") or ""
+            local = ""
+            # --list previews the breakdown without downloading anything; otherwise
+            # fetch each chosen element's publish into the local mirror.
+            if rel and not args.list:
+                local = os.path.join(local_root, *rel.split("/"))
+                client.download(rr + "/" + rel, local)
+            collection = "" if r["kind"] == "camera" else r["asset"].split("/")[-1]
+            out.append({"id": r["id"], "label": r["label"], "kind": r["kind"],
+                        "asset": r["asset"], "blend_local": local,
+                        "source_step": r["source_step"], "collection": collection,
+                        "available_steps": r.get("available_steps", []),
+                        "look": r.get("look", ""), "load": r.get("load", "link"),
+                        "apply_look": r.get("apply_look", False),
+                        "camera_name": r.get("camera_name", "")})
+    print(json.dumps(out))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Common flags live on a parent parser so they work either before OR after
     # the subcommand (e.g. both `animpipe --dry-run init-project` and
@@ -729,6 +831,47 @@ def build_parser() -> argparse.ArgumentParser:
                     help="copy the clip matching this filename substring")
     rc.add_argument("--list", action="store_true", help="just list the clips")
     rc.set_defaults(func=cmd_review_copy)
+
+    asm = sub.add_parser("assembly", parents=[common],
+                         help="manage a shot's element breakdown")
+    asm_sub = asm.add_subparsers(dest="assembly_cmd", required=True)
+
+    al = asm_sub.add_parser("list", parents=[common],
+                            help="print a shot's elements (JSON)")
+    al.add_argument("--shot", required=True, help="shot entity, e.g. SEQ010/SH0010")
+    al.set_defaults(func=cmd_assembly_list)
+
+    aa = asm_sub.add_parser("add", parents=[common],
+                            help="add an element to a shot")
+    aa.add_argument("--shot", required=True, help="shot entity, e.g. SEQ010/SH0010")
+    aa.add_argument("--asset", help="asset entity, e.g. characters/frankenstein")
+    aa.add_argument("--camera", action="store_true",
+                    help="add the shot's own camera as an element")
+    aa.add_argument("--label", default="", help="display label (default: asset name)")
+    aa.add_argument("--look", default="",
+                    help="surface look name to apply downstream (lighting)")
+    aa.set_defaults(func=cmd_assembly_add)
+
+    ar = asm_sub.add_parser("remove", parents=[common],
+                            help="remove an element from a shot by id")
+    ar.add_argument("--shot", required=True, help="shot entity")
+    ar.add_argument("--id", required=True, help="element id (see 'assembly list')")
+    ar.set_defaults(func=cmd_assembly_remove)
+
+    ra = sub.add_parser("resolve-assembly", parents=[common],
+                        help="resolve a shot's elements + download their publishes "
+                             "(JSON for the Blender add-on)")
+    ra.add_argument("--task", help="shot task id (entity + step)")
+    ra.add_argument("--shot", help="shot entity (if not using --task)")
+    ra.add_argument("--step", help="shot step (layout/animation/...); "
+                                   "default: the task's step")
+    ra.add_argument("--list", action="store_true",
+                    help="resolve + preview the breakdown without downloading")
+    ra.add_argument("--only", action="append", default=[],
+                    help="resolve/fetch only this element id (repeatable)")
+    ra.add_argument("--pick", action="append", default=[],
+                    help="override an element's step as id=step (repeatable)")
+    ra.set_defaults(func=cmd_resolve_assembly)
 
     return p
 

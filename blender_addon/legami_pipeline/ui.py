@@ -24,6 +24,11 @@ class LEGAMI_MT_menu(bpy.types.Menu):
             if task.get("type") == "asset" and task.get("step") != "model":
                 layout.operator("legami.apply_look", text="Apply look…",
                                 icon="MATERIAL")
+            # Shot layout: assemble the breakdown (link each element's rig, build
+            # the shot camera). Additive — safe to re-run to pull in new elements.
+            if task.get("type") == "shot" and task.get("step") == "layout":
+                layout.operator("legami.build_shot", text="Build shot",
+                                icon="OUTLINER_OB_GROUP_INSTANCE")
             layout.operator("legami.save_to_task", icon="FILE_TICK")
             layout.operator("legami.run_checks", icon="CHECKMARK")
             layout.operator("legami.publish", text="Publish…", icon="EXPORT")

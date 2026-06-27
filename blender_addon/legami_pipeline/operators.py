@@ -635,6 +635,52 @@ class LEGAMI_OT_check(bpy.types.Operator):
         return {"FINISHED"}  # informational only
 
 
+def _wrap_publish_in_collection(context, coll_name, loc):
+    """Move the PUBLISH subtree into a fresh collection named `coll_name` so the
+    saved publish .blend contains ONE linkable collection (downstream shots link the
+    rig/model by this collection name to get clean library overrides). Returns a
+    restore() callable that puts the objects back and removes the temp collection —
+    call it after the copy is written so the artist's working session is untouched."""
+    if loc is None:
+        return lambda: None
+    objs = [loc, *_descendants(loc)]
+    prior = {o: list(o.users_collection) for o in objs}   # restore exactly
+    coll = bpy.data.collections.new(coll_name)
+    context.scene.collection.children.link(coll)
+    for o in objs:
+        for c in prior[o]:
+            try:
+                c.objects.unlink(o)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            coll.objects.link(o)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def restore():
+        for o in objs:
+            try:
+                coll.objects.unlink(o)
+            except Exception:  # noqa: BLE001
+                pass
+            for c in prior[o]:
+                try:
+                    c.objects.link(o)
+                except Exception:  # noqa: BLE001
+                    pass
+        try:
+            context.scene.collection.children.unlink(coll)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            bpy.data.collections.remove(coll)
+        except Exception:  # noqa: BLE001
+            pass
+
+    return restore
+
+
 class LEGAMI_OT_publish(bpy.types.Operator):
     bl_idname = "legami.publish"
     bl_label = "Publish"
@@ -736,11 +782,25 @@ class LEGAMI_OT_publish(bpy.types.Operator):
             kind = f"look '{look_name}': {len(materials)} material(s), " \
                    f"{len(written)} texture file(s)"
         else:
-            bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)
+            # Wrap the PUBLISH subtree in a collection named after the asset so a
+            # downstream shot can LINK it as one unit (clean library overrides), and
+            # relativize texture paths so a linked rig/model resolves its maps on any
+            # machine (the same absolute-path bug fixed for look textures). We mutate
+            # the live session only to write the copy, then restore it.
+            loc = bpy.data.objects.get(publish_locator_name())
+            restore_pub = _wrap_publish_in_collection(context, name, loc)
+            try:
+                try:
+                    bpy.ops.file.make_paths_relative()
+                except Exception:  # noqa: BLE001 — unsaved / cross-drive textures
+                    pass
+                # relative_remap (default True) re-bases '//' paths to pub_path.
+                bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)
+            finally:
+                restore_pub()
             files = [pub_path]
             fbx_path = pub_path[:-6] + ".fbx"   # .blend -> .fbx
             # Export only the geometry under the publish locator, if present.
-            loc = bpy.data.objects.get(publish_locator_name())
             use_sel = False
             if loc:
                 try:
@@ -1250,6 +1310,341 @@ class LEGAMI_OT_preview_turntable(bpy.types.Operator):
         return {"FINISHED"}
 
 
+ELEMENT_HOLDER_PREFIX = "element__"
+
+
+def _element_holder(context, element_id):
+    """The per-element scene collection (created if absent) that holds one element
+    instance — unique per id, so two instances of the same asset never clash."""
+    nm = ELEMENT_HOLDER_PREFIX + element_id
+    holder = bpy.data.collections.get(nm)
+    if holder is None:
+        holder = bpy.data.collections.new(nm)
+    if holder.name not in context.scene.collection.children:
+        context.scene.collection.children.link(holder)
+    return holder
+
+
+def _link_asset_element(context, element):
+    """LINK the asset's published collection and make a poseable library override,
+    placed under the element's holder collection. Returns (holder, error)."""
+    blend = element.get("blend_local")
+    if not blend or not os.path.isfile(blend):
+        return None, "publish not found locally"
+    coll_name = element.get("collection") or ""
+    holder = _element_holder(context, element["id"])
+
+    # Link the named collection (fall back to the file's first collection for
+    # pre-collection publishes).
+    with bpy.data.libraries.load(blend, link=True, relative=True) as (src, dst):
+        if coll_name and coll_name in src.collections:
+            dst.collections = [coll_name]
+        elif src.collections:
+            dst.collections = [src.collections[0]]
+        else:
+            dst.collections = []
+    linked = next((c for c in dst.collections if c is not None), None)
+    if linked is None:
+        return None, "no linkable collection (republish the rig/model)"
+
+    # Build a full, editable override hierarchy so the rig is poseable.
+    try:
+        override = linked.override_hierarchy_create(
+            context.scene, context.view_layer, do_fully_editable=True)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"override failed: {exc}"
+
+    # Relocate the override collection under the element holder.
+    sc = context.scene.collection
+    try:
+        if override.name in sc.children:
+            sc.children.unlink(override)
+        if override.name not in holder.children:
+            holder.children.link(override)
+    except Exception:  # noqa: BLE001
+        pass
+    return holder, None
+
+
+def _build_camera_rig(context, element):
+    """Build a fresh Dolly camera rig (Add Camera Rigs add-on) named after the shot
+    and place it under the element holder — the layout artist's camera to animate.
+    Only the armature + camera go into the holder; the add-on's WGT-* bone shapes
+    stay in its hidden Widgets collection (they're shapes, not controls)."""
+    holder = _element_holder(context, element["id"])
+    name = element.get("camera_name") or "shot_camera"
+    before_objs = set(bpy.data.objects)
+    before_colls = set(bpy.data.collections)
+    try:
+        bpy.ops.object.build_camera_rig(mode="DOLLY")
+    except Exception as exc:  # noqa: BLE001 — add-on missing/disabled
+        return None, f"camera-rig add-on unavailable ({exc})"
+    new_objs = [o for o in bpy.data.objects if o not in before_objs]
+    new_colls = [c for c in bpy.data.collections if c not in before_colls]
+    if not new_objs:
+        return None, "camera rig build produced nothing"
+    rig = next((o for o in new_objs if o.type == "ARMATURE"), None)
+    cam = next((o for o in new_objs if o.type == "CAMERA"), None)
+
+    # Relocate ONLY the rig + camera into the holder. The bone-shape widgets
+    # (WGT-*) are deliberately left in the add-on's hidden Widgets collection — they
+    # are not controls and moving them does nothing.
+    for o in (rig, cam):
+        if o is None:
+            continue
+        for c in list(o.users_collection):
+            try:
+                c.objects.unlink(o)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            holder.objects.link(o)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Tuck the add-on's new widget collection under the holder and keep it hidden,
+    # so it doesn't clutter the scene root or invite stray clicks.
+    sc = context.scene.collection
+    for c in new_colls:
+        try:
+            if c.name in sc.children:
+                sc.children.unlink(c)
+                holder.children.link(c)
+            c.hide_viewport = True
+        except Exception:  # noqa: BLE001
+            pass
+
+    if rig is not None:
+        rig.name = name
+        if cam is not None:
+            cam.name = name + "_Camera"
+    if cam is not None:
+        context.scene.camera = cam
+    return holder, None
+
+
+def _load_camera_element(context, element):
+    """The shot's own camera. If layout published one, APPEND it (editable shot
+    data); otherwise build a fresh Dolly camera rig named after the shot."""
+    blend = element.get("blend_local")
+    if blend and os.path.isfile(blend):
+        holder = _element_holder(context, element["id"])
+        with bpy.data.libraries.load(blend, link=False) as (src, dst):
+            dst.objects = list(src.objects)
+        cam = None
+        for o in dst.objects:
+            if o is None:
+                continue
+            if o.name not in holder.objects:
+                try:
+                    holder.objects.link(o)
+                except Exception:  # noqa: BLE001
+                    pass
+            if getattr(o, "type", "") == "CAMERA" and cam is None:
+                cam = o
+        if cam is not None:
+            context.scene.camera = cam
+        return holder, None
+    return _build_camera_rig(context, element)
+
+
+_ELEMENT_LOADERS = {
+    "asset": _link_asset_element,
+    "camera": _load_camera_element,
+    # LATER (lighting round): "cache": _link_alembic_cache,
+}
+
+
+def _element_detail(el, present):
+    """One-line description of what an element will bring in, for the dialog."""
+    if present:
+        return "already in scene"
+    kind = el.get("kind")
+    if kind == "camera":
+        return ("new Dolly camera rig" if el.get("load") == "create_rig"
+                else "shot camera (published)")
+    src = el.get("source_step") or "?"
+    return f"link {src}"
+
+
+# Dynamic per-row step dropdown. The enum items are derived from each row's
+# steps_csv; we cache the built lists (keyed by the csv) so the strings stay alive
+# — Blender crashes if an items callback returns lists it can garbage-collect.
+_STEP_ENUM_CACHE = {}
+
+
+def _step_enum_items(self, context):
+    key = self.steps_csv or ""
+    if key not in _STEP_ENUM_CACHE:
+        steps = [s for s in key.split(",") if s] or ["model"]
+        _STEP_ENUM_CACHE[key] = [
+            (s, s.capitalize(), f"Bring in the {s} publish") for s in steps]
+    return _STEP_ENUM_CACHE[key]
+
+
+class LEGAMI_AssemblyItem(bpy.types.PropertyGroup):
+    """One row in the Build-shot dialog: an element, which step to bring in, and
+    whether to build it."""
+    enabled: bpy.props.BoolProperty(name="Build", default=True)
+    label: bpy.props.StringProperty()
+    kind: bpy.props.StringProperty()
+    detail: bpy.props.StringProperty()
+    present: bpy.props.BoolProperty(default=False)
+    steps_csv: bpy.props.StringProperty()    # available steps, comma-separated
+    step: bpy.props.EnumProperty(name="Step", items=_step_enum_items,
+                                 description="Which published step to bring in")
+    payload: bpy.props.StringProperty()      # json of the resolved element
+
+
+class LEGAMI_OT_build_shot(bpy.types.Operator):
+    bl_idname = "legami.build_shot"
+    bl_label = "Build shot"
+    bl_description = ("Bring this shot's breakdown into the scene: link each chosen "
+                      "element's rig as a poseable override and build the shot "
+                      "camera. Additive — elements already in the scene are left "
+                      "untouched, so your posing/animation is never lost")
+
+    # The per-element rows live on the WindowManager (legami_build_items) — an
+    # operator-owned CollectionProperty doesn't reliably populate the props dialog.
+
+    def invoke(self, context, event):
+        task = active_task()
+        if not task or task.get("type") != "shot" or not task.get("entity"):
+            self.report({"ERROR"}, "No active shot task — open a shot's layout task "
+                                   "from the Workspace app.")
+            return {"CANCELLED"}
+        if not bpy.data.filepath:
+            self.report({"ERROR"}, "Save into the task first (Legami ▸ Save into "
+                                   "task) — linked rigs need the shot file on disk "
+                                   "to store relative paths.")
+            return {"CANCELLED"}
+
+        listed = self._resolve(task, list_only=True)   # preview, no downloads
+        if listed is None:
+            self.report({"ERROR"}, "Couldn't resolve the shot assembly — launch from "
+                                   "the Workspace app and check your connection.")
+            return {"CANCELLED"}
+        if not listed:
+            self.report({"WARNING"}, "Shot has no elements yet. Add them in the "
+                                     "Workspace app (right-click the shot ▸ Elements…) "
+                                     "and publish the assets' rigs/model.")
+            return {"CANCELLED"}
+
+        existing = {c.name for c in bpy.data.collections}
+        rows = context.window_manager.legami_build_items
+        rows.clear()
+        for el in listed:
+            it = rows.add()
+            it.payload = json.dumps(el)
+            it.kind = el.get("kind", "asset")
+            it.label = el.get("label") or el.get("id", "")
+            it.present = ELEMENT_HOLDER_PREFIX + str(el.get("id", "")) in existing
+            it.enabled = not it.present          # default: build the new ones
+            it.detail = _element_detail(el, it.present)
+            steps = el.get("available_steps") or []
+            it.steps_csv = ",".join(steps)
+            if steps and el.get("source_step") in steps:
+                it.step = el["source_step"]      # default to the resolved step
+        return context.window_manager.invoke_props_dialog(
+            self, width=480, title="Build shot", confirm_text="Build")
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.label(text="Bring these elements into the shot:")
+        box = col.box()
+        for it in context.window_manager.legami_build_items:
+            row = box.row(align=True)
+            cb = row.row()
+            cb.enabled = not it.present          # present ones can't be re-built here
+            cb.prop(it, "enabled", text="")
+            icon = ("CHECKMARK" if it.present
+                    else "OUTLINER_OB_CAMERA" if it.kind == "camera"
+                    else "OUTLINER_OB_ARMATURE")
+            row.label(text=it.label, icon=icon)
+            if it.present:
+                row.label(text="already in scene")
+            elif it.kind == "camera":
+                row.label(text=it.detail)
+            else:
+                # asset: a step dropdown (rig/model/…) so you control what's linked.
+                sub = row.row()
+                sub.enabled = it.enabled
+                sub.prop(it, "step", text="")
+
+    def execute(self, context):
+        task = active_task()
+        if not task:
+            return {"CANCELLED"}
+        chosen, picks, present_ct, deselected_ct = [], {}, 0, 0
+        for it in context.window_manager.legami_build_items:
+            if it.present:
+                present_ct += 1
+            elif it.enabled:
+                eid = json.loads(it.payload)["id"]
+                chosen.append(eid)
+                if it.kind == "asset" and it.step:   # honour the chosen step
+                    picks[eid] = it.step
+            else:
+                deselected_ct += 1
+        if not chosen:
+            self.report({"WARNING"},
+                        f"Nothing selected to build ({present_ct} already in scene).")
+            return {"CANCELLED"}
+
+        # downloads only the chosen, at their chosen steps
+        elements = self._resolve(task, only=chosen, picks=picks)
+        if not elements:
+            self.report({"ERROR"}, "Couldn't fetch the selected elements — check "
+                                   "your connection and retry.")
+            return {"CANCELLED"}
+
+        built, skipped = [], []
+        for el in elements:
+            loader = _ELEMENT_LOADERS.get(el.get("kind"))
+            if loader is None:
+                skipped.append((el, "unsupported kind"))
+                continue
+            try:
+                holder, err = loader(context, el)
+            except Exception as exc:  # noqa: BLE001 — one bad element never kills it
+                holder, err = None, str(exc)
+            (built if holder else skipped).append((el, err))
+
+        # Store linked-library paths relative to the shot .blend (cross-machine).
+        try:
+            bpy.ops.file.make_paths_relative()
+        except Exception:  # noqa: BLE001
+            pass
+
+        parts = [f"Built {len(built)} element(s)"]
+        if present_ct:
+            parts.append(f"{present_ct} already in scene")
+        if deselected_ct:
+            parts.append(f"{deselected_ct} not selected")
+        if skipped:
+            parts.append("skipped " + ", ".join(
+                f"{e.get('id', '?')} ({err})" for e, err in skipped))
+        self.report({"INFO"} if built else {"WARNING"}, "; ".join(parts))
+        return {"FINISHED"} if built else {"CANCELLED"}
+
+    def _resolve(self, task, list_only=False, only=None, picks=None):
+        args = ["resolve-assembly", "--task", task["id"]]
+        if list_only:
+            args.append("--list")
+        for eid in only or []:
+            args += ["--only", eid]
+        for eid, st in (picks or {}).items():
+            args += ["--pick", f"{eid}={st}"]
+        cmd, td = _toolkit_cmd(args)
+        if cmd is None:
+            return None
+        try:
+            out = subprocess.check_output(cmd, cwd=td, text=True).strip()
+            return json.loads(out.splitlines()[-1]) if out else []
+        except Exception:  # noqa: BLE001
+            return None
+
+
 CLASSES = (
     LEGAMI_OT_apply_project_settings,
     LEGAMI_OT_verify_ocio,
@@ -1260,6 +1655,8 @@ CLASSES = (
     LEGAMI_OT_publish,
     LEGAMI_OT_load_model,
     LEGAMI_OT_apply_look,
+    LEGAMI_AssemblyItem,            # PropertyGroup — register before the operator
+    LEGAMI_OT_build_shot,
     LEGAMI_OT_turntable_framing,
     LEGAMI_OT_preview_turntable,
 )

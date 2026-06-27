@@ -1261,6 +1261,8 @@ class MainWindow(QMainWindow):
         else:
             ver_menu.setEnabled(False)
         act_hist = menu.addAction("Publish history…")
+        # A shot's element breakdown is shared across its steps — edit it here.
+        act_elements = menu.addAction("Elements…") if t.get("type") == "shot" else None
         menu.addSeparator()
         act_delete = menu.addAction("Delete task")
         chosen = menu.exec(self.tasks_table.viewport().mapToGlobal(pos))
@@ -1270,8 +1272,48 @@ class MainWindow(QMainWindow):
             self._open_task_in_blender(t, ver_actions[chosen])
         elif chosen == act_hist:
             self._show_history(t)
+        elif act_elements is not None and chosen == act_elements:
+            self._open_elements_editor(t)
         elif chosen == act_delete:
             self._delete_task(t)
+
+    def _open_elements_editor(self, task: dict):
+        """Edit a shot's element breakdown (the assets + camera it contains).
+        Loads/saves assembly.json on the Job thread so the UI never blocks."""
+        if not self.cfg:
+            return
+        from animpipe import elements as elementsmod
+        shot_entity = task["entity"]
+        remote = self.cfg.remote_root
+        asset_entities = sorted({t["entity"] for t in self._tasks
+                                 if t.get("type") == "asset"})
+
+        def done(assembly):
+            self._busy_buttons(False)
+            dlg = ElementsDialog(shot_entity, assembly, asset_entities, self)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            new_assembly = dlg.assembly()
+            actor = self._creds_user_safe()
+
+            def save_work():
+                return self._conn_do(lambda c: elementsmod.save_assembly(
+                    c, remote, shot_entity, new_assembly, actor))
+
+            self._busy_buttons(True)
+            self._spawn(
+                save_work,
+                lambda _r: (self._busy_buttons(False),
+                            self.status.showMessage(
+                                f"Saved {len(new_assembly['elements'])} element(s) "
+                                f"for {shot_entity}.")),
+                busy_msg="Saving elements…")
+
+        self._busy_buttons(True)
+        self._spawn(
+            lambda: self._conn_do(
+                lambda c: elementsmod.load_assembly(c, remote, shot_entity)),
+            done, busy_msg="Loading elements…")
 
     def _show_history(self, task: dict):
         import datetime as _dt
@@ -1646,6 +1688,99 @@ class NewShotDialog(_NewEntityDialog):
         return {"type": "shot", "seq": self._seq(),
                 "shot": self.ed_shot.text().strip(), "entity": self._entity(),
                 "steps": _checked_steps(self._step_boxes)}
+
+
+class ElementsDialog(QDialog):
+    """Edit a shot's element breakdown. Pure UI over an in-memory assembly dict;
+    the caller saves it via elements.save_assembly. No network here."""
+
+    def __init__(self, shot_entity, assembly, asset_entities, parent=None):
+        super().__init__(parent)
+        from animpipe import elements as E
+        self._E = E
+        self._asset_entities = list(asset_entities or [])
+        self._assembly = E.normalize(dict(assembly), shot_entity)
+        self.setWindowTitle(f"Elements — {shot_entity}")
+        self.setMinimumWidth(560)
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel(
+            "Assets this shot contains. Layout links each one's rig; lighting will "
+            "load its cache (later). The camera is the shot's own published camera."))
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["On", "Kind", "Asset / Camera",
+                                              "Look", "Id"])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        root.addWidget(self.table, 1)
+
+        add_row = QHBoxLayout()
+        self.cb_asset = QComboBox()
+        self.cb_asset.addItems(self._asset_entities)
+        self.ed_look = QLineEdit()
+        self.ed_look.setPlaceholderText("look (optional)")
+        b_add = QPushButton("Add asset")
+        b_add.clicked.connect(self._add_asset)
+        b_cam = QPushButton("Add camera")
+        b_cam.clicked.connect(self._add_camera)
+        b_rm = QPushButton("Remove selected")
+        b_rm.clicked.connect(self._remove_selected)
+        for w in (self.cb_asset, self.ed_look, b_add, b_cam):
+            add_row.addWidget(w)
+        add_row.addStretch(1)
+        add_row.addWidget(b_rm)
+        root.addLayout(add_row)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._commit_enabled_then_accept)
+        bb.rejected.connect(self.reject)
+        root.addWidget(bb)
+        self._reload()
+
+    def _reload(self):
+        els = self._assembly["elements"]
+        self.table.setRowCount(len(els))
+        for i, e in enumerate(els):
+            cb = QCheckBox()
+            cb.setChecked(e.get("enabled", True))
+            self.table.setCellWidget(i, 0, cb)
+            cells = (e["kind"], e["asset"] or "(shot camera)",
+                     e.get("look", ""), e["id"])
+            for j, val in enumerate(cells, start=1):
+                self.table.setItem(i, j, QTableWidgetItem(val))
+
+    def _add_asset(self):
+        ent = self.cb_asset.currentText().strip()
+        if not ent:
+            return
+        self._E.add_element(self._assembly,
+                            self._E.new_element(ent, "asset",
+                                                look=self.ed_look.text().strip()))
+        self.ed_look.clear()
+        self._reload()
+
+    def _add_camera(self):
+        self._E.add_element(self._assembly, self._E.new_element("", "camera"))
+        self._reload()
+
+    def _remove_selected(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        self._E.remove_element(self._assembly,
+                               self._assembly["elements"][row]["id"])
+        self._reload()
+
+    def _commit_enabled_then_accept(self):
+        for i, e in enumerate(self._assembly["elements"]):
+            w = self.table.cellWidget(i, 0)
+            if w is not None:
+                e["enabled"] = w.isChecked()
+        self.accept()
+
+    def assembly(self) -> dict:
+        return self._assembly
 
 
 class BugReportDialog(QDialog):

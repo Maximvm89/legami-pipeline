@@ -18,11 +18,14 @@ sys.path.insert(0, str(ROOT / "blender_addon"))
 def _install_fake_bpy():
     bpy = types.ModuleType("bpy")
     bpy.types = types.SimpleNamespace(Operator=object, Panel=object,
-                                      AddonPreferences=object, Menu=object)
+                                      AddonPreferences=object, Menu=object,
+                                      PropertyGroup=object)
     def _prop(*a, **k):
         return None
     bpy.props = types.SimpleNamespace(
-        BoolProperty=_prop, StringProperty=_prop, IntProperty=_prop, FloatProperty=_prop)
+        BoolProperty=_prop, StringProperty=_prop, IntProperty=_prop,
+        FloatProperty=_prop, EnumProperty=_prop, CollectionProperty=_prop,
+        PointerProperty=_prop)
     bpy.utils = types.SimpleNamespace(
         user_resource=lambda *a, **k: "/tmp/legami_modules")
     bpy.context = types.SimpleNamespace()

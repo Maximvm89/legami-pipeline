@@ -130,3 +130,142 @@ def test_fetch_publish_errors_when_no_publish(monkeypatch, capsys):
                                      into=None))
     assert rc == 1
     assert "no published" in capsys.readouterr().err
+
+
+# ---- assembly / resolve-assembly -------------------------------------------
+
+def test_assembly_add_then_list(monkeypatch, capsys):
+    import json
+    srv = _DownloadSrv()
+    _patch(monkeypatch, srv)
+    rc = cli.cmd_assembly_add(_args(shot="SEQ010/SH0010",
+                                    asset="characters/frankenstein",
+                                    camera=False, label="", look=""))
+    assert rc == 0
+    rc = cli.cmd_assembly_add(_args(shot="SEQ010/SH0010", asset="",
+                                    camera=True, label="", look=""))
+    assert rc == 0
+    capsys.readouterr()  # drain
+    rc = cli.cmd_assembly_list(_args(shot="SEQ010/SH0010"))
+    assert rc == 0
+    els = json.loads(capsys.readouterr().out)
+    assert [e["id"] for e in els] == ["frankenstein", "camera"]
+    assert els[1]["kind"] == "camera"
+
+
+def test_assembly_add_requires_asset_or_camera(monkeypatch, capsys):
+    srv = _DownloadSrv()
+    _patch(monkeypatch, srv)
+    rc = cli.cmd_assembly_add(_args(shot="SEQ010/SH0010", asset="",
+                                    camera=False, label="", look=""))
+    assert rc == 1
+    assert "--asset required" in capsys.readouterr().err
+
+
+def test_assembly_remove(monkeypatch, capsys):
+    srv = _DownloadSrv()
+    _patch(monkeypatch, srv)
+    cli.cmd_assembly_add(_args(shot="SEQ010/SH0010",
+                               asset="characters/frankenstein",
+                               camera=False, label="", look=""))
+    capsys.readouterr()
+    rc = cli.cmd_assembly_remove(_args(shot="SEQ010/SH0010", id="frankenstein"))
+    assert rc == 0
+    rc = cli.cmd_assembly_remove(_args(shot="SEQ010/SH0010", id="nope"))
+    assert rc == 1
+    assert "no element" in capsys.readouterr().err
+
+
+def test_resolve_assembly_downloads_and_prints_json(monkeypatch, capsys, tmp_path):
+    import json
+    from animpipe import turntable, elements as E
+    monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
+    srv = _DownloadSrv()
+    ent = "characters/frankenstein"
+    tasks.save_task(srv, "/r", tasks.new_task("asset", ent, "model"))
+    tasks.publish_task(srv, "/r", "marco", ["/tmp/frankenstein_model_v001.blend"],
+                       tasks.make_id("asset", ent, "model"))
+    shot = "SEQ010/SH0010"
+    shot_task = tasks.save_task(srv, "/r", tasks.new_task("shot", shot, "layout"))
+    asm = E.empty_assembly(shot)
+    E.add_element(asm, E.new_element(ent))
+    E.save_assembly(srv, "/r", shot, asm)
+
+    _patch(monkeypatch, srv, local_root=str(tmp_path))
+    rc = cli.cmd_resolve_assembly(_args(task=shot_task["id"], shot=None, step=None, list=False, only=[], pick=[]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert len(out) == 1
+    el = out[0]
+    assert el["id"] == "frankenstein" and el["source_step"] == "model"
+    assert el["collection"] == "frankenstein"
+    assert el["blend_local"].endswith("frankenstein_model_v001.blend")
+    # downloaded the resolved publish
+    assert srv.downloads[-1][0].endswith("frankenstein_model_v001.blend")
+
+
+def test_resolve_assembly_rejects_non_shot_task(monkeypatch, capsys, tmp_path):
+    from animpipe import turntable
+    monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
+    srv = _DownloadSrv()
+    at = tasks.save_task(srv, "/r",
+                         tasks.new_task("asset", "characters/frankenstein", "model"))
+    _patch(monkeypatch, srv, local_root=str(tmp_path))
+    rc = cli.cmd_resolve_assembly(_args(task=at["id"], shot=None, step=None, list=False, only=[], pick=[]))
+    assert rc == 1
+    assert "not a shot task" in capsys.readouterr().err
+
+
+def test_resolve_assembly_list_does_not_download(monkeypatch, capsys, tmp_path):
+    import json
+    from animpipe import turntable, elements as E
+    monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
+    srv = _DownloadSrv()
+    ent = "characters/frankenstein"
+    tasks.save_task(srv, "/r", tasks.new_task("asset", ent, "model"))
+    tasks.publish_task(srv, "/r", "marco", ["/tmp/frankenstein_model_v001.blend"],
+                       tasks.make_id("asset", ent, "model"))
+    shot = "SEQ010/SH0010"
+    shot_task = tasks.save_task(srv, "/r", tasks.new_task("shot", shot, "layout"))
+    asm = E.empty_assembly(shot)
+    E.add_element(asm, E.new_element(ent))
+    E.add_element(asm, E.new_element("", "camera"))   # create_rig, no publish
+    E.save_assembly(srv, "/r", shot, asm)
+
+    _patch(monkeypatch, srv, local_root=str(tmp_path))
+    rc = cli.cmd_resolve_assembly(_args(task=shot_task["id"], shot=None, step=None,
+                                        list=True, only=[], pick=[]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert {e["id"] for e in out} == {"frankenstein", "camera"}     # both listed
+    assert all(e["blend_local"] == "" for e in out)                 # nothing fetched
+    assert srv.downloads == []
+    cam = next(e for e in out if e["kind"] == "camera")
+    assert cam["load"] == "create_rig" and cam["camera_name"] == "SEQ010_SH0010"
+
+
+def test_resolve_assembly_only_fetches_chosen(monkeypatch, capsys, tmp_path):
+    import json
+    from animpipe import turntable, elements as E
+    monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
+    srv = _DownloadSrv()
+    for nm in ("characters/frankenstein", "props/box"):
+        tasks.save_task(srv, "/r", tasks.new_task("asset", nm, "model"))
+        base = nm.split("/")[-1]
+        tasks.publish_task(srv, "/r", "marco", [f"/tmp/{base}_model_v001.blend"],
+                           tasks.make_id("asset", nm, "model"))
+    shot = "SEQ010/SH0010"
+    shot_task = tasks.save_task(srv, "/r", tasks.new_task("shot", shot, "layout"))
+    asm = E.empty_assembly(shot)
+    E.add_element(asm, E.new_element("characters/frankenstein"))
+    E.add_element(asm, E.new_element("props/box"))
+    E.save_assembly(srv, "/r", shot, asm)
+
+    _patch(monkeypatch, srv, local_root=str(tmp_path))
+    rc = cli.cmd_resolve_assembly(_args(task=shot_task["id"], shot=None, step=None,
+                                        list=False, only=["box"], pick=[]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert [e["id"] for e in out] == ["box"]                        # filtered
+    assert len(srv.downloads) == 1
+    assert srv.downloads[0][0].endswith("box_model_v001.blend")     # only box fetched

@@ -64,5 +64,15 @@
   },
   "publish": {
     "locator": "PUBLISH"
+  },
+  "_assembly_note": "Shot 'elements' (breakdown): how each element resolves per step. layout/animation link the asset's rig (model fallback); lighting will load the alembic cache + apply looks (next round). camera_step = which shot step publishes the shot's own camera. Omit to use the built-in defaults.",
+  "assembly": {
+    "camera_step": "layout",
+    "representations": {
+      "layout":    {"source_step": "rig", "fallback_step": "model", "load": "link",    "apply_look": false},
+      "animation": {"source_step": "rig", "fallback_step": "model", "load": "link",    "apply_look": false},
+      "lighting":  {"source_step": "cache", "fallback_step": "model", "load": "alembic", "apply_look": true},
+      "comp": null
+    }
   }
 }
