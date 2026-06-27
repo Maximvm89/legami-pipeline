@@ -672,6 +672,25 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _purge_orphan_data(data):
+    """Remove a now-unused data-block (mesh/light/camera/…) so objects dropped
+    during a selective append don't linger as orphans and ride into the next
+    publish. Best-effort: tries each id collection until one accepts it."""
+    if data is None or getattr(data, "users", 1) != 0:
+        return
+    for attr in ("meshes", "lights", "cameras", "curves", "metaballs",
+                 "lattices", "grease_pencils_v3", "grease_pencils", "volumes",
+                 "armatures"):
+        coll = getattr(bpy.data, attr, None)
+        if coll is None:
+            continue
+        try:
+            coll.remove(data)
+            return
+        except (TypeError, RuntimeError, ReferenceError):
+            continue
+
+
 class LEGAMI_OT_load_model(bpy.types.Operator):
     bl_idname = "legami.load_model"
     bl_label = "Load published model"
@@ -714,17 +733,43 @@ class LEGAMI_OT_load_model(bpy.types.Operator):
             return None
 
     def _append_objects(self, context, blend_path):
+        name = publish_locator_name()
         with bpy.data.libraries.load(blend_path, link=False) as (src, dst):
             dst.objects = list(src.objects)
-        added = [o for o in dst.objects if o is not None]
+        appended = [o for o in dst.objects if o is not None]
+        # The published .blend is the modeler's whole work scene — it carries the
+        # PUBLISH locator's geometry PLUS scene clutter (helper cubes, cameras,
+        # lights, line-art). The locator defines exactly what was published, so we
+        # bring in ONLY its subtree and drop the rest — the pipeline must never
+        # pull random objects into a downstream file.
+        locator = next((o for o in appended
+                        if getattr(o, "type", "") == "EMPTY"
+                        and (o.name == name or o.name.split(".")[0] == name)), None)
+        if locator is not None:
+            keep = {locator, *locator.children_recursive}
+        else:
+            # No locator (shouldn't happen — publish requires one): fall back to
+            # geometry only, never cameras/lights/grease-pencil.
+            keep = {o for o in appended
+                    if getattr(o, "type", "") in ("MESH", "EMPTY")}
+        extras = [o for o in appended if o not in keep]
+        for o in extras:
+            data = getattr(o, "data", None)
+            try:
+                bpy.data.objects.remove(o, do_unlink=True)
+            except Exception:  # noqa: BLE001
+                pass
+            _purge_orphan_data(data)   # don't let dropped data ride into the publish
+
+        kept = [o for o in appended if o in keep]
         coll = context.scene.collection.objects
-        for o in added:
+        for o in kept:
             if o.name not in coll:
                 try:
                     coll.link(o)
                 except RuntimeError:
                     pass
-        return added
+        return kept
 
     def _parent_under_locator(self, context, objs):
         name = publish_locator_name()
