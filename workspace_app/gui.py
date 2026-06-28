@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QInputDialog, QMenu, QPlainTextEdit, QCheckBox, QSpinBox,
 )
 
-from animpipe.config import ProjectConfig, SFTPCredentials, CACHED_CONFIG
+from animpipe.config import (ProjectConfig, SFTPCredentials, CACHED_CONFIG,
+                             save_local_root)
 from animpipe.sftp import SFTPClient
 from animpipe import tasks as tasksmod
 from animpipe import schema as schema_mod
@@ -874,15 +875,24 @@ class MainWindow(QMainWindow):
         if not self.cfg:
             return
         local = self.ed_local.text().strip()
-        try:
-            core.set_local_root_in_config(self.config_path, local)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Could not configure", str(exc))
+        if not local:
+            QMessageBox.warning(self, "Local folder", "Enter a local folder first.")
             return
+        # Authoritative: persist per-user (survives the cached config.yaml being
+        # re-downloaded from the server on each sign-in).
+        save_local_root(local)
+        if self.cfg:
+            self.cfg.local_root = local   # use it for this session immediately
+        # Best-effort: also write it into a real (non-cached) config.yaml for devs.
+        try:
+            if os.path.abspath(self.config_path) != os.path.abspath(CACHED_CONFIG):
+                core.set_local_root_in_config(self.config_path, local)
+        except Exception:  # noqa: BLE001 — the per-user file already persisted it
+            pass
         QMessageBox.information(
             self, "Blender configured",
-            f"Saved local folder to config.yaml.\nThe launcher and Blender addon "
-            f"will now save into:\n{local}")
+            f"Saved local folder.\nThe launcher and Blender addon will now save "
+            f"into:\n{local}")
 
     # ---- lazy tree ----------------------------------------------------------
     def _make_item(self, node, lazy=True) -> QTreeWidgetItem:

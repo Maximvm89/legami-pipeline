@@ -28,6 +28,27 @@ LEGAMI_HOME = os.path.join(os.path.expanduser("~"), ".legami")
 USER_CRED_FILE = os.path.join(LEGAMI_HOME, "credentials.env")
 CACHE_DIR = os.path.join(LEGAMI_HOME, "cache")
 CACHED_CONFIG = os.path.join(CACHE_DIR, "config.yaml")
+# Per-user local project folder. Stored OUTSIDE the cache because cache/config.yaml
+# is re-downloaded from the server on every sign-in (which would wipe a local_root
+# written there). This file persists the artist's chosen folder across restarts.
+LOCAL_ROOT_FILE = os.path.join(LEGAMI_HOME, "local_root")
+
+
+def save_local_root(value: str) -> str:
+    """Persist the artist's local project folder per-user. Returns the path written."""
+    os.makedirs(LEGAMI_HOME, exist_ok=True)
+    with open(LOCAL_ROOT_FILE, "w", encoding="utf-8") as fh:
+        fh.write((value or "").strip() + "\n")
+    return LOCAL_ROOT_FILE
+
+
+def load_local_root() -> str | None:
+    """The per-user local project folder, or None if never set."""
+    try:
+        with open(LOCAL_ROOT_FILE, encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
 
 
 @dataclass
@@ -114,9 +135,24 @@ class ProjectConfig:
     sftp_port: int = 22
 
     def resolved_local_root(self) -> str:
-        """Local project folder, defaulting to ~/Legami/<CODE> if not set."""
+        """Local project folder. Precedence:
+          1. LEGAMI_PROJECT_ROOT env — the launcher exports the app's resolved
+             folder so subprocesses (the turntable/playblast the Blender addon
+             shells out to) read project_settings.json from the SAME place the app
+             synced, instead of re-deriving a stale default.
+          2. project.local_root from config.yaml — explicit dev/show override.
+          3. the per-user saved folder (~/.legami/local_root) — survives the
+             cache config.yaml being re-downloaded on each sign-in.
+          4. the default ~/Legami/<CODE>.
+        """
+        env_root = os.environ.get("LEGAMI_PROJECT_ROOT")
+        if env_root:
+            return os.path.expanduser(env_root)
         if self.local_root:
             return os.path.expanduser(self.local_root)
+        saved = load_local_root()
+        if saved:
+            return os.path.expanduser(saved)
         return os.path.join(os.path.expanduser("~"), "Legami", self.code)
 
     @classmethod
