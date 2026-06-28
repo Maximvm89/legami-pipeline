@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QMessageBox, QAbstractItemView, QGroupBox, QTabWidget,
     QComboBox, QTableWidget, QTableWidgetItem, QDialog, QFormLayout,
     QDialogButtonBox, QInputDialog, QMenu, QPlainTextEdit, QCheckBox, QSpinBox,
+    QListWidget, QListWidgetItem,
 )
 
 from animpipe.config import (ProjectConfig, SFTPCredentials, CACHED_CONFIG,
@@ -32,6 +33,7 @@ from animpipe.sftp import SFTPClient
 from animpipe import tasks as tasksmod
 from animpipe import schema as schema_mod
 from animpipe import review as reviewmod
+from animpipe import users as usersmod
 from animpipe import clipboard as clipboardmod
 from animpipe import bugreport
 from animpipe.version import get_version
@@ -141,6 +143,7 @@ class MainWindow(QMainWindow):
         self._full_tree: core.TreeNode | None = None  # cached full scan for filters
         self._ledger: dict = {}  # rel -> (user, time), who uploaded each file
         self._tasks: list[dict] = []
+        self._roster: list[dict] = []
 
         self._build_menu()
         self._build_ui()
@@ -183,6 +186,9 @@ class MainWindow(QMainWindow):
         act = QAction("Open config…", self)
         act.triggered.connect(self._pick_config)
         m.addAction(act)
+        act_users = QAction("Manage users…", self)
+        act_users.triggered.connect(self._manage_users)
+        m.addAction(act_users)
 
         h = self.menuBar().addMenu("Help")
         report = QAction("Report a bug…", self)
@@ -830,6 +836,13 @@ class MainWindow(QMainWindow):
                                  f"{host}:{root}\n\n{exc}")
             return
         creds.save_user()
+        # Record presence so the project roster tracks everyone who can sign in
+        # (the user IS allowed on the project — they just authenticated to it).
+        try:
+            with SFTPClient(creds) as c:
+                usersmod.register_self(c, root, user)
+        except Exception:  # noqa: BLE001 — never block sign-in on roster bookkeeping
+            pass
         self._load_config()   # now loads the downloaded config from the cache
         self.status.showMessage(f"Signed in as {user}.")
 
@@ -1160,13 +1173,15 @@ class MainWindow(QMainWindow):
         remote = self.cfg.remote_root
 
         def work():
-            return self._conn_do(lambda c: tasksmod.load_tasks(c, remote))
+            tasks = self._conn_do(lambda c: tasksmod.load_tasks(c, remote))
+            roster = self._conn_do(lambda c: usersmod.load_roster(c, remote))
+            return tasks, roster
 
-        def done(tasks):
+        def done(result):
             self._busy_buttons(False)
-            self._tasks = tasks
+            self._tasks, self._roster = result
             self._render_tasks()
-            self.status.showMessage(f"{len(tasks)} task(s) loaded.")
+            self.status.showMessage(f"{len(self._tasks)} task(s) loaded.")
 
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg="Loading tasks…")
@@ -1200,7 +1215,8 @@ class MainWindow(QMainWindow):
                 t.get("entity", ""),
                 f"{step_icon(step)}  {step}",
                 f"{dot}  {tasksmod.STATUS_LABELS.get(status, status)}",
-                ", ".join(t.get("assignees") or []),
+                ", ".join(usersmod.display_name(self._roster, u)
+                          for u in (t.get("assignees") or [])),
                 t.get("updated_by", ""),
             ]
             for j, text in enumerate(cells):
@@ -1255,10 +1271,105 @@ class MainWindow(QMainWindow):
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg="Updating assignees…")
 
+    def _manage_users(self):
+        if not self.cfg:
+            QMessageBox.information(self, "Not signed in",
+                                    "Sign in to a project first.")
+            return
+        remote = self.cfg.remote_root
+        me = self._creds_user_safe()
+
+        def load():
+            return self._conn_do(lambda c: usersmod.load_roster(c, remote))
+
+        def opened(roster):
+            self._busy_buttons(False)
+            self._roster = roster
+            # Supervisors edit; before any supervisor exists the roster is
+            # un-bootstrapped, so anyone may open it and run Discover.
+            can_edit = (not usersmod.has_supervisor(roster)
+                        or usersmod.is_supervisor(roster, me))
+            dlg = ManageUsersDialog(roster, me, can_edit, self)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            if dlg.do_discover:
+                self._discover_users()
+            elif dlg.result_users is not None:
+                self._save_roster(dlg.result_users)
+
+        self._busy_buttons(True)
+        self._spawn(load, opened, busy_msg="Loading users…")
+
+    def _save_roster(self, users: list[dict]):
+        remote = self.cfg.remote_root
+
+        def work():
+            self._conn_do(lambda c: usersmod.save_roster(c, remote, users))
+            return self._conn_do(lambda c: usersmod.load_roster(c, remote))
+
+        def done(roster):
+            self._busy_buttons(False)
+            self._roster = roster
+            self._render_tasks()
+            self.status.showMessage(f"Saved {len(users)} project user(s).")
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Saving users…")
+
+    def _discover_users(self):
+        remote = self.cfg.remote_root
+        me = self._creds_user_safe()
+        # Seed from existing task assignees too, not just sign-ins/uploads.
+        extra = sorted({a for t in self._tasks for a in (t.get("assignees") or [])})
+
+        def work():
+            return self._conn_do(lambda c: usersmod.discover(
+                c, remote, extra_usernames=extra, promote_supervisor=me))
+
+        def done(roster):
+            self._busy_buttons(False)
+            self._roster = roster
+            self._render_tasks()
+            self.status.showMessage(f"Discovered {len(roster)} project user(s).")
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Discovering users…")
+
     def _assign_to(self):
-        name, ok = QInputDialog.getText(self, "Assign to", "Username:")
-        if ok and name.strip():
-            self._assign_selected(name.strip(), True)
+        if not self._selected_tasks():
+            QMessageBox.information(self, "No tasks selected", "Select tasks first.")
+            return
+        roster = usersmod.active_users(self._roster)
+        if not roster:
+            QMessageBox.information(
+                self, "No users yet",
+                "No project users to assign. Open File → Manage users… and run "
+                "Discover to build the roster.")
+            return
+        dlg = UserPickerDialog(roster, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        chosen = dlg.selected_usernames()
+        if not chosen:
+            return
+        chosen_tasks = self._selected_tasks()
+        remote = self.cfg.remote_root
+        actor = self._creds_user_safe()
+        ids = [t["id"] for t in chosen_tasks]
+
+        def work():
+            for tid in ids:
+                for name in chosen:
+                    self._conn_do(lambda c, x=tid, n=name: tasksmod.assign(
+                        c, remote, x, n, add=True, actor=actor))
+            return len(ids)
+
+        def done(_n):
+            self._busy_buttons(False)
+            self._load_tasks()
+
+        self._busy_buttons(True)
+        self._spawn(work, done, busy_msg="Updating assignees…")
 
     def _apply_status(self):
         if not self.cfg:
@@ -1915,6 +2026,154 @@ class BugReportDialog(QDialog):
         self.description = self.ed_desc.toPlainText()
         self.include_log = self.cb_log.isChecked()
         self.include_screenshot = self.cb_shot.isChecked()
+        self.accept()
+
+
+class UserPickerDialog(QDialog):
+    """Pick one or more project users (by display name) to assign. Roster-backed,
+    so there's no free-text typing of usernames."""
+
+    def __init__(self, roster: list[dict], parent=None, preselected=None):
+        super().__init__(parent)
+        self.setWindowTitle("Assign to")
+        self.resize(320, 380)
+        pre = set(preselected or [])
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Assign the selected task(s) to:"))
+        self.listw = QListWidget()
+        self.listw.setSelectionMode(QAbstractItemView.NoSelection)
+        for u in sorted(roster, key=lambda x: (x.get("display") or "").lower()):
+            label = u.get("display") or u["username"]
+            if u.get("role") == usersmod.SUPERVISOR:
+                label += "  (supervisor)"
+            it = QListWidgetItem(label)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if u["username"] in pre else Qt.Unchecked)
+            it.setData(Qt.UserRole, u["username"])
+            self.listw.addItem(it)
+        root.addWidget(self.listw, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        root.addWidget(bb)
+
+    def selected_usernames(self) -> list[str]:
+        out = []
+        for i in range(self.listw.count()):
+            it = self.listw.item(i)
+            if it.checkState() == Qt.Checked:
+                out.append(it.data(Qt.UserRole))
+        return out
+
+
+class ManageUsersDialog(QDialog):
+    """Edit the curated project roster: display name, role, active. Editing is
+    enabled only for supervisors (read-only otherwise). 'Discover' seeds the
+    roster from everyone who has signed in / uploaded; the first time it runs it
+    makes the running user the first supervisor."""
+
+    ROLE_LABELS = {usersmod.ARTIST: "Artist", usersmod.SUPERVISOR: "Supervisor"}
+
+    def __init__(self, roster: list[dict], me: str, can_edit: bool, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Manage users")
+        self.resize(560, 420)
+        self._me = me
+        self._can_edit = can_edit
+        self.result_users: list[dict] | None = None   # set on save
+        self.do_discover = False
+
+        root = QVBoxLayout(self)
+        note = ("Project users — assignable in Tasks. Usernames match the SFTP login."
+                if can_edit else
+                "Read-only — only a supervisor can edit the roster.")
+        root.addWidget(QLabel(note))
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Username", "Display name", "Role", "Active"])
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(
+            QAbstractItemView.AllEditTriggers if can_edit else QAbstractItemView.NoEditTriggers)
+        root.addWidget(self.table, 1)
+        for u in sorted(roster, key=lambda x: (x.get("display") or "").lower()):
+            self._add_row(u)
+
+        btns = QHBoxLayout()
+        if can_edit:
+            b_add = QPushButton("Add user…")
+            b_add.clicked.connect(self._add_blank)
+            btns.addWidget(b_add)
+            b_remove = QPushButton("Remove")
+            b_remove.clicked.connect(self._remove_selected)
+            btns.addWidget(b_remove)
+            b_discover = QPushButton("Discover from server")
+            b_discover.setToolTip("Add everyone who has signed in or uploaded to "
+                                  "this project.")
+            b_discover.clicked.connect(self._on_discover)
+            btns.addWidget(b_discover)
+        btns.addStretch(1)
+        bb = QDialogButtonBox(
+            (QDialogButtonBox.Save | QDialogButtonBox.Cancel) if can_edit
+            else QDialogButtonBox.Close)
+        bb.accepted.connect(self._on_save)
+        bb.rejected.connect(self.reject)
+        if not can_edit:
+            bb.button(QDialogButtonBox.Close).clicked.connect(self.reject)
+        btns.addWidget(bb)
+        root.addLayout(btns)
+
+    def _add_row(self, u: dict):
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+        self.table.setItem(r, 0, QTableWidgetItem(u.get("username", "")))
+        self.table.setItem(r, 1, QTableWidgetItem(u.get("display") or u.get("username", "")))
+        role_cell = QComboBox()
+        for key, lbl in self.ROLE_LABELS.items():
+            role_cell.addItem(lbl, key)
+        role_cell.setCurrentIndex(max(0, list(self.ROLE_LABELS).index(
+            u.get("role") if u.get("role") in self.ROLE_LABELS else usersmod.ARTIST)))
+        role_cell.setEnabled(self._can_edit)
+        self.table.setCellWidget(r, 2, role_cell)
+        active = QCheckBox()
+        active.setChecked(bool(u.get("active", True)))
+        active.setEnabled(self._can_edit)
+        self.table.setCellWidget(r, 3, active)
+        # username is the identity key — never editable after creation
+        self.table.item(r, 0).setFlags(self.table.item(r, 0).flags() & ~Qt.ItemIsEditable)
+
+    def _add_blank(self):
+        name, ok = QInputDialog.getText(self, "Add user",
+                                        "SFTP username (must match their login):")
+        if ok and name.strip():
+            self._add_row(usersmod.new_user(name.strip()))
+
+    def _remove_selected(self):
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        for r in rows:
+            self.table.removeRow(r)
+
+    def _on_discover(self):
+        # Defer the actual server scan to the caller (it owns the connection);
+        # just signal intent and close with save semantics.
+        self.do_discover = True
+        self.accept()
+
+    def _collect(self) -> list[dict]:
+        out = []
+        for r in range(self.table.rowCount()):
+            name = (self.table.item(r, 0).text() or "").strip()
+            if not name:
+                continue
+            disp = (self.table.item(r, 1).text() or "").strip()
+            role = self.table.cellWidget(r, 2).currentData()
+            active = self.table.cellWidget(r, 3).isChecked()
+            out.append(usersmod.new_user(name, disp, role, active))
+        return out
+
+    def _on_save(self):
+        if self._can_edit:
+            self.result_users = self._collect()
         self.accept()
 
 
