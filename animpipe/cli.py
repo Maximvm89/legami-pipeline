@@ -227,12 +227,27 @@ def cmd_publish(args) -> int:
               f"{args.task} and set status '{args.status}'")
         return 0
     from . import tasks as T
+    from . import progress as P
+    import time as _time
     creds = SFTPCredentials.from_env(args.env)
+
+    # Emit throttled progress lines the Blender add-on parses to drive a bar.
+    start = _time.monotonic()
+    last = [0.0, -1]   # (last emit time, last percent) — throttle the stream
+    def _emit(done, total, name):
+        now = _time.monotonic()
+        pct = P.percent(done, total)
+        if pct == last[1] and now - last[0] < 0.25:
+            return
+        last[0], last[1] = now, pct
+        print(P.format_line(done, total, now - start, f"uploading {name}"), flush=True)
+
     with SFTPClient(creds) as client:
         rels = T.publish_task(client, cfg.remote_root, creds.user,
                               args.local, args.task, args.status,
                               description=args.description,
-                              texture_files=args.texture)
+                              texture_files=args.texture, progress=_emit)
+    print(P.format_line(1, 1, _time.monotonic() - start, "done"), flush=True)
     if not rels:
         print(f"error: task not found: {args.task}", file=sys.stderr)
         return 1

@@ -98,3 +98,20 @@ def test_apply_skips_cycles_when_engine_not_cycles():
     operators.apply_settings(scene, data, "/proj/LEGAMI", warnings)
     assert scene.cycles.samples is None  # cycles block skipped
     assert scene.render.engine == "BLENDER_EEVEE_NEXT"
+
+
+def test_parse_progress_matches_toolkit_format():
+    # The add-on parser must agree with animpipe.progress (separate Pythons).
+    from animpipe import progress as P
+    line = P.format_line(50, 100, 5, "uploading panda_model_v001.blend")
+    assert operators._parse_progress(line) == (50, 5.0, "uploading panda_model_v001.blend")
+    assert operators._parse_progress("not a progress line") is None
+    # blank eta early on
+    pct, eta, _ = operators._parse_progress(P.format_line(0, 100, 0, "x"))
+    assert pct == 0 and eta is None
+
+
+def test_human_eta_formatting():
+    assert operators._human_eta(None) == ""
+    assert operators._human_eta(8) == "~8s left"
+    assert operators._human_eta(125) == "~2m left"

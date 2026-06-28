@@ -972,49 +972,178 @@ class LEGAMI_OT_publish(bpy.types.Operator):
                         f"wasn't found to upload — push via the Workspace app.")
             return {"FINISHED"}
 
-        try:
-            subprocess.check_call(pub_cmd, cwd=td)
-        except Exception as exc:  # noqa: BLE001
-            self.report({"ERROR"}, f"Saved locally but upload failed: {exc}")
-            return {"CANCELLED"}
-
         context.window_manager.legami_publish_desc = ""  # reset for next publish
 
-        # Kick off review media in the BACKGROUND (non-blocking).
-        tt_msg = ""
-        if (task.get("step") == "model"
-                and context.window_manager.legami_render_turntable):
-            try:
-                tt_cmd, _ = _toolkit_cmd(
-                    ["turntable", "--model", pub_path, "--task", task["id"]])
-                subprocess.Popen(tt_cmd, cwd=td)
-                tt_msg = " Turntable rendering in background → dailies."
-            except Exception as exc:  # noqa: BLE001
-                print("[Legami] could not start turntable:", exc)
-        elif (task.get("step") == "surface"
-                and context.window_manager.legami_render_turntable):
-            try:
-                lr_cmd, _ = _toolkit_cmd(
-                    ["look-review", "--task", task["id"], "--look", look_name])
-                subprocess.Popen(lr_cmd, cwd=td)
-                tt_msg = " Look review (turntable + texture sheet) rendering → dailies."
-            except Exception as exc:  # noqa: BLE001
-                print("[Legami] could not start look review:", exc)
-        elif (task.get("type") == "shot"
-                and context.window_manager.legami_render_turntable):
-            try:
-                pb_cmd, _ = _toolkit_cmd(
-                    ["playblast", "--shot-file", pub_path, "--task", task["id"]])
-                subprocess.Popen(pb_cmd, cwd=td)
-                tt_msg = " Playblast rendering in background → dailies."
-            except Exception as exc:  # noqa: BLE001
-                print("[Legami] could not start playblast:", exc)
-
+        # Hand the (slow) upload to a modal operator so Blender stays responsive
+        # and shows a live progress bar instead of freezing. The post-upload
+        # background render is kicked off when the upload finishes (see the modal
+        # operator), preserving the previous ordering.
         warns = sum(1 for lvl, _ in issues if lvl == checks.WARNING)
         suffix = f" ({warns} warning(s))" if warns else ""
-        self.report({"INFO"}, f"Published {base}_v{version:03d} ({kind}); "
-                              f"task → Review.{suffix}{tt_msg}")
+        _PENDING_UPLOAD.clear()
+        _PENDING_UPLOAD.update({
+            "cmd": pub_cmd, "cwd": td, "n_files": len(files),
+            "success": (f"Published {base}_v{version:03d} ({kind}); "
+                        f"task → Review.{suffix}"),
+            "render": bool(context.window_manager.legami_render_turntable),
+            "step": task.get("step"), "ttype": task.get("type"),
+            "task_id": task["id"], "pub_path": pub_path, "look_name": look_name,
+        })
+        bpy.ops.legami.publish_upload('INVOKE_DEFAULT')
         return {"FINISHED"}
+
+
+# Handoff from LEGAMI_OT_publish to the modal uploader (the codebase's established
+# pattern for passing rich data into an operator).
+_PENDING_UPLOAD: dict = {}
+
+_PROGRESS_PREFIX = "LEGAMI_PROGRESS"
+
+
+def _parse_progress(line):
+    """Parse a 'LEGAMI_PROGRESS <pct> <eta> <msg>' line -> (pct, eta|None, msg),
+    or None. Mirrors animpipe.progress (the toolkit runs in a separate Python, so
+    the add-on can't import it)."""
+    if not line or not line.startswith(_PROGRESS_PREFIX):
+        return None
+    rest = line[len(_PROGRESS_PREFIX):].strip().split(" ", 2)
+    try:
+        pct = int(rest[0])
+    except (IndexError, ValueError):
+        return None
+    eta = None
+    if len(rest) > 1 and rest[1]:
+        try:
+            eta = float(rest[1])
+        except ValueError:
+            eta = None
+    return pct, eta, (rest[2] if len(rest) > 2 else "")
+
+
+def _human_eta(eta):
+    if eta is None:
+        return ""
+    return f"~{int(eta)}s left" if eta < 90 else f"~{int(round(eta / 60))}m left"
+
+
+class LEGAMI_OT_publish_upload(bpy.types.Operator):
+    """Run the publish upload as a background subprocess and show a live progress
+    bar (Blender's progress cursor + a status-bar message with %, ETA), so the UI
+    no longer freezes during the SFTP transfer. Kicks the background review render
+    when the upload completes."""
+    bl_idname = "legami.publish_upload"
+    bl_label = "Publishing…"
+
+    def invoke(self, context, event):
+        import queue
+        import threading
+        self._data = dict(_PENDING_UPLOAD)
+        if not self._data.get("cmd"):
+            self.report({"ERROR"}, "Nothing to upload.")
+            return {"CANCELLED"}
+        try:
+            self._proc = subprocess.Popen(
+                self._data["cmd"], cwd=self._data["cwd"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1)
+        except Exception as exc:  # noqa: BLE001
+            self.report({"ERROR"}, f"Could not start upload: {exc}")
+            return {"CANCELLED"}
+
+        self._queue = queue.Queue()
+
+        def _reader(proc, q):
+            try:
+                for line in proc.stdout:
+                    q.put(line.rstrip("\n"))
+            except Exception:  # noqa: BLE001
+                pass
+            q.put(None)  # EOF sentinel
+        self._thread = threading.Thread(
+            target=_reader, args=(self._proc, self._queue), daemon=True)
+        self._thread.start()
+
+        self._pct, self._eta = 0, None
+        wm = context.window_manager
+        wm.progress_begin(0, 100)
+        self._status(context, "Publishing… starting")
+        self._timer = wm.event_timer_add(0.1, window=context.window)
+        wm.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type != 'TIMER':
+            return {"PASS_THROUGH"}
+        eof = False
+        while True:
+            try:
+                line = self._queue.get_nowait()
+            except Exception:  # noqa: BLE001 — queue.Empty
+                break
+            if line is None:
+                eof = True
+                break
+            print(line)  # keep full toolkit output in blender.log
+            parsed = _parse_progress(line)
+            if parsed:
+                self._pct, self._eta, _ = parsed
+                context.window_manager.progress_update(self._pct)
+                eta = _human_eta(self._eta)
+                self._status(context,
+                             f"Publishing… {self._pct}%" + (f" · {eta}" if eta else ""))
+        if eof:
+            return self._finish(context)
+        return {"PASS_THROUGH"}
+
+    def _status(self, context, text):
+        try:
+            context.workspace.status_text_set(text)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _finish(self, context):
+        wm = context.window_manager
+        try:
+            wm.event_timer_remove(self._timer)
+        except Exception:  # noqa: BLE001
+            pass
+        wm.progress_end()
+        self._status(context, None)  # clear the status bar
+        rc = self._proc.poll()
+        if rc not in (0, None):
+            self.report({"ERROR"},
+                        "Publish upload failed — see the console / blender.log.")
+            return {"CANCELLED"}
+        msg = self._data.get("success", "Published.") + self._kick_render()
+        self.report({"INFO"}, msg)
+        return {"FINISHED"}
+
+    def _kick_render(self):
+        """Start the review media (turntable/look-review/playblast) in the
+        background, as the blocking path did — but only after the upload lands."""
+        d = self._data
+        if not d.get("render"):
+            return ""
+        if d.get("step") == "model":
+            cmd = ["turntable", "--model", d["pub_path"], "--task", d["task_id"]]
+            note = " Turntable rendering in background → dailies."
+        elif d.get("step") == "surface":
+            cmd = ["look-review", "--task", d["task_id"], "--look", d["look_name"]]
+            note = " Look review (turntable + texture sheet) rendering → dailies."
+        elif d.get("ttype") == "shot":
+            cmd = ["playblast", "--shot-file", d["pub_path"], "--task", d["task_id"]]
+            note = " Playblast rendering in background → dailies."
+        else:
+            return ""
+        full, td = _toolkit_cmd(cmd)
+        if not full:
+            return ""
+        try:
+            subprocess.Popen(full, cwd=td)
+            return note
+        except Exception as exc:  # noqa: BLE001
+            print("[Legami] could not start background render:", exc)
+            return ""
 
 
 def _addon_module_by_leaf(leaf):
@@ -2154,6 +2283,7 @@ CLASSES = (
     LEGAMI_OT_check,
     LEGAMI_PublishItem,             # PropertyGroup — register before the operator
     LEGAMI_OT_publish,
+    LEGAMI_OT_publish_upload,
     LEGAMI_OT_load_model,
     LEGAMI_OT_apply_look,
     LEGAMI_AssemblyItem,            # PropertyGroup — register before the operator

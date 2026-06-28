@@ -141,7 +141,8 @@ def published_looks(task: dict) -> list[dict]:
 
 def publish_task(sftp, remote_root: str, username: str, local_files,
                  task_id: str, status: str = "review",
-                 description: str = "", texture_files=None) -> list[str] | None:
+                 description: str = "", texture_files=None,
+                 progress=None) -> list[str] | None:
     """Publish one or more files for a task: upload each into the task's publish/
     folder, record attribution, append a publish-history entry (with the artist's
     description), and advance the task status. Returns the published rel paths,
@@ -172,11 +173,11 @@ def publish_task(sftp, remote_root: str, username: str, local_files,
             "file(s) " + ", ".join(clash) +
             f" already published for task {task_id}; refusing to overwrite. "
             "Re-run publish to get the next version.")
-    rels = []
+    # Resolve every (local file -> publish rel) up front so we can report progress
+    # against the grand total of bytes, across the .blend/FBX and any textures.
+    jobs: list[tuple[str, str]] = []
     for f in local_files:
-        rel = task_dir_rel(task) + "/publish/" + _os.path.basename(f)
-        sftp.upload(f, remote_root.rstrip("/") + "/" + rel)
-        rels.append(rel)
+        jobs.append((f, task_dir_rel(task) + "/publish/" + _os.path.basename(f)))
     for f in texture_files or []:
         # Preserve the texture's path under publish/ (e.g. a per-version subfolder
         # 'textures/<base>_vNNN/<tile>.png') so published looks stay immutable —
@@ -184,8 +185,26 @@ def publish_task(sftp, remote_root: str, username: str, local_files,
         norm = f.replace("\\", "/")
         sub = (norm.split("/publish/", 1)[1] if "/publish/" in norm
                else "textures/" + _os.path.basename(f))
-        rel = task_dir_rel(task) + "/publish/" + sub
-        sftp.upload(f, remote_root.rstrip("/") + "/" + rel)
+        jobs.append((f, task_dir_rel(task) + "/publish/" + sub))
+
+    def _sz(p):
+        try:
+            return _os.path.getsize(p)
+        except OSError:
+            return 0
+    total = sum(_sz(f) for f, _ in jobs) or 1
+    done = [0]   # bytes fully uploaded before the current file (mutable for closure)
+    rels = []
+    for f, rel in jobs:
+        name = _os.path.basename(f)
+        cb = None
+        if progress:
+            def cb(sent, _file_total, _base=done[0], _name=name):
+                progress(_base + sent, total, _name)
+        sftp.upload(f, remote_root.rstrip("/") + "/" + rel, callback=cb)
+        done[0] += _sz(f)
+        if progress:
+            progress(done[0], total, name)
         rels.append(rel)
     ledger.record_uploads(sftp, remote_root, username, rels)
 

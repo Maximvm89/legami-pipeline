@@ -37,8 +37,15 @@ class FakeSrv:
     def remove(self, p):
         self.files.pop(p, None)
 
-    def upload(self, local, remote):
+    def upload(self, local, remote, callback=None):
         self.files[remote] = f"<blend:{local}>"
+        if callback:                       # simulate a single full-size transfer
+            import os as _os
+            try:
+                n = _os.path.getsize(local)
+            except OSError:
+                n = 0
+            callback(n, n)
 
 
 def test_make_id_safe():

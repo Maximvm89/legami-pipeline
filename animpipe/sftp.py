@@ -280,14 +280,16 @@ class SFTPClient:
         with self._sftp.open(remote_path, "w") as fh:
             fh.write(text.encode("utf-8"))
 
-    def upload(self, local_path: str, remote_path: str) -> None:
-        """Upload a file, creating parents and preserving mtime (clean diffs)."""
+    def upload(self, local_path: str, remote_path: str, callback=None) -> None:
+        """Upload a file, creating parents and preserving mtime (clean diffs).
+        `callback(bytes_so_far, total_bytes)` (paramiko's put callback) fires during
+        transfer so callers can show progress."""
         parent = posixpath.dirname(remote_path)
         if parent:
             self.makedirs(parent)
         if self.dry_run:
             return
-        self._sftp.put(local_path, remote_path)
+        self._sftp.put(local_path, remote_path, callback=callback)
         st = os.stat(local_path)
         try:
             self._sftp.utime(remote_path, (st.st_atime, st.st_mtime))
