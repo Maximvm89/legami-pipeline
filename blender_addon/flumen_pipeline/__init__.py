@@ -78,6 +78,12 @@ def register():
     bpy.types.WindowManager.flumen_lookdev_hdri = bpy.props.EnumProperty(
         name="Review HDRI", items=_ops.lookdev_hdri_items,
         description="HDRI to light the look review turntable (from 05_library/hdri)")
+    bpy.types.WindowManager.flumen_dressing_name = bpy.props.StringProperty(
+        name="Dressing", default="default",
+        description="Name of this set-dressing variant (e.g. night_market) — pick "
+                    "an existing one to publish a new version, or type a new name. "
+                    "Each name versions independently and is selectable per shot",
+        search=_ops.dressing_name_search)
     # Per-element rows for the Build-shot dialog (operator-owned collections don't
     # reliably populate a props dialog, so they live on the WindowManager).
     bpy.types.WindowManager.flumen_build_items = bpy.props.CollectionProperty(
@@ -108,6 +114,7 @@ def unregister():
     del bpy.types.WindowManager.flumen_render_turntable
     del bpy.types.WindowManager.flumen_look_name
     del bpy.types.WindowManager.flumen_lookdev_hdri
+    del bpy.types.WindowManager.flumen_dressing_name
     del bpy.types.WindowManager.flumen_build_items
     del bpy.types.WindowManager.flumen_anim_items
     del bpy.types.WindowManager.flumen_publish_items

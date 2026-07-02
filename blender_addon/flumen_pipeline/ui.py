@@ -20,6 +20,12 @@ class FLUMEN_MT_menu(bpy.types.Menu):
             # Surface/rig depend on the published model — pull it in to work on.
             if task.get("step") in ("surface", "rig"):
                 layout.operator("flumen.load_model", icon="IMPORT")
+            # Set-dressing: link the environment, then place published props.
+            if task.get("step") == "dressing":
+                layout.operator("flumen.build_dressing", text="Load environment",
+                                icon="WORLD")
+                layout.operator("flumen.add_prop", text="Add prop…",
+                                icon="OUTLINER_OB_GROUP_INSTANCE")
             # Re-apply a published look onto the character (rig and beyond).
             if task.get("type") == "asset" and task.get("step") != "model":
                 layout.operator("flumen.apply_look", text="Apply look…",

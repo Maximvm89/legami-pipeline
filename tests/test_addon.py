@@ -115,3 +115,73 @@ def test_human_eta_formatting():
     assert operators._human_eta(None) == ""
     assert operators._human_eta(8) == "~8s left"
     assert operators._human_eta(125) == "~2m left"
+
+
+def test_dressing_collect_prop_instances_and_environment():
+    from types import SimpleNamespace as NS
+    from flumen_pipeline import dressing as D
+
+    class FakeObj:
+        def __init__(self, name, props=None, matrix=None):
+            self.name = name
+            self._props = props or {}
+            self.matrix_world = matrix or [[1, 0, 0, 0], [0, 1, 0, 0],
+                                           [0, 0, 1, 0], [0, 0, 0, 1]]
+        def get(self, key, default=None):
+            return self._props.get(key, default)
+
+    objs = [
+        FakeObj("prop_root__lantern", {
+            "flumen_prop_id": "lantern", "flumen_prop_asset": "props/lantern",
+            "flumen_prop_step": "model",
+            "flumen_prop_blend_rel": "03_assets/props/lantern/model/publish/l_v002.blend",
+            "flumen_prop_collection": "lantern"},
+            [[1, 0, 0, 2.5], [0, 1, 0, -1], [0, 0, 1, 0], [0, 0, 0, 1]]),
+        FakeObj("some_mesh"),                       # ignored: not a prop root
+        FakeObj("prop_root__crate", {}),            # minimal: id from the name
+    ]
+    props = D.collect_prop_instances(objs)
+    assert [p["id"] for p in props] == ["crate", "lantern"]        # sorted
+    lantern = props[1]
+    assert lantern["asset"] == "props/lantern"
+    assert lantern["object"] == "prop_root__lantern"
+    assert lantern["matrix_world"][0][3] == 2.5
+    assert props[0]["source_step"] == "model"                       # default
+
+    colls = [FakeObj("element__x"), FakeObj("environment__market_square", {
+        "flumen_env_asset": "environments/market_square",
+        "flumen_env_blend_rel": "03_assets/environments/market_square/model/publish/m_v004.blend"})]
+    env = D.collect_environment(colls)
+    assert env["asset"] == "environments/market_square"
+    assert env["source_step"] == "model"
+    assert D.collect_environment([FakeObj("element__x")]) is None
+
+
+def test_dressing_unmanaged_holders_and_ids_and_rel():
+    from flumen_pipeline import dressing as D
+
+    class N:
+        def __init__(self, name):
+            self.name = name
+        def get(self, k, d=None):
+            return d
+
+    colls = [N("prop__lantern"), N("prop__crate"), N("environment__m")]
+    objs = [N("prop_root__lantern")]
+    assert D.unmanaged_prop_holders(colls, objs) == ["prop__crate"]
+
+    assert D.prop_id_for("Lantern", set()) == "lantern"
+    assert D.prop_id_for("lantern", {"lantern"}) == "lantern_2"
+    assert D.prop_id_for("lantern", {"lantern", "lantern_2"}) == "lantern_3"
+
+    assert D.rel_from_local("E:\\Legami_4\\03_assets\\props\\l.blend",
+                            "E:/Legami_4") == "03_assets/props/l.blend"
+    assert D.rel_from_local("/mnt/other/x.blend", "/home/me/proj") == ""
+
+
+def test_dressing_naming_parity_with_toolkit():
+    # The addon slug must agree with flumen.dressing (separate Pythons at runtime).
+    from flumen_pipeline import dressing as AD
+    from flumen import dressing as TD
+    for raw in ("Night Market!", "", "  a--b  "):
+        assert AD.normalize_dressing_name(raw) == TD.normalize_dressing_name(raw)

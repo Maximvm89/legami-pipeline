@@ -146,6 +146,11 @@ def run_checks(step, scene, objects, locator="PUBLISH", textures=None,
     a shot publish is checked for a camera + the right frame range instead."""
     if ttype == "shot":
         return check_shot(scene, objects, frame_start)
+    if step == "dressing":
+        # A dressing scene has no PUBLISH locator — everything in it is linked.
+        # Its gate (an environment holder must exist) lives in the publish
+        # operator, which owns the collection data this module never sees.
+        return check_units(scene)
     if step == "model":
         issues = check_model(scene, objects)
     elif step == "surface":

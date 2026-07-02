@@ -13,6 +13,7 @@ from . import checks
 from . import textures
 from . import look as look_mod
 from . import anim as anim_mod
+from . import dressing as dressing_mod
 
 
 def _prefs():
@@ -772,6 +773,9 @@ class FLUMEN_OT_publish(bpy.types.Operator):
         if task.get("step") == "surface":
             global _EXISTING_LOOKS
             _EXISTING_LOOKS = _fetch_existing_looks(task["id"])
+        if task.get("step") == "dressing":
+            global _EXISTING_DRESSINGS
+            _EXISTING_DRESSINGS = _fetch_existing_dressings(task["id"])
         if task.get("type") == "shot":
             _prepare_shot_publish_anim(context, task)
         return context.window_manager.invoke_props_dialog(
@@ -787,6 +791,9 @@ class FLUMEN_OT_publish(bpy.types.Operator):
             wm = context.window_manager
             col.prop(wm, "flumen_look_name", text="Look name")
             col.prop(wm, "flumen_render_turntable", text="Render look review")
+        if task and task.get("step") == "dressing":
+            col.prop(context.window_manager, "flumen_dressing_name",
+                     text="Dressing name")
         if task and task.get("type") == "shot":
             rows = context.window_manager.flumen_publish_items
             if len(rows):
@@ -825,13 +832,18 @@ class FLUMEN_OT_publish(bpy.types.Operator):
         publish_dir = os.path.join(os.path.dirname(task["work_dir"]), "publish")
         os.makedirs(publish_dir, exist_ok=True)
         name = task["entity"].split("/")[-1]
-        # Surface publishes a named look, versioned on its own track; other steps
-        # version by step.
+        # Surface publishes a named look, dressing a named prop layout — each
+        # versioned on its own track; other steps version by step.
         look_name = ""
+        dressing_name = ""
         if task["step"] == "surface":
             look_name = look_mod.normalize_look_name(
                 context.window_manager.flumen_look_name)
             base = look_mod.look_base(name, look_name)
+        elif task["step"] == "dressing":
+            dressing_name = dressing_mod.normalize_dressing_name(
+                context.window_manager.flumen_dressing_name)
+            base = f"{name}_dressing_{dressing_name}"
         else:
             base = f"{name}_{task['step']}"
         # The server publish history is the single source of truth for versions.
@@ -870,6 +882,39 @@ class FLUMEN_OT_publish(bpy.types.Operator):
             texture_files = written
             kind = f"look '{look_name}': {len(materials)} material(s), " \
                    f"{len(written)} texture file(s)"
+        elif task["step"] == "dressing":
+            # A dressing = the instance manifest (env + prop placements referencing
+            # published assets) + the working scene for reference. Light: everything
+            # in the scene is linked.
+            env = dressing_mod.collect_environment(bpy.data.collections)
+            if not env or not env.get("asset"):
+                self.report({"ERROR"}, "No environment loaded — run 'Load "
+                                       "environment' first.")
+                return {"CANCELLED"}
+            props = dressing_mod.collect_prop_instances(bpy.data.objects)
+            unmanaged = dressing_mod.unmanaged_prop_holders(
+                bpy.data.collections, bpy.data.objects)
+            if unmanaged:
+                self.report({"WARNING"},
+                            f"{len(unmanaged)} prop holder(s) without a prop_root "
+                            f"empty won't be in the manifest (use Add prop): "
+                            + ", ".join(unmanaged[:3]))
+            try:
+                bpy.ops.file.make_paths_relative()
+            except Exception:  # noqa: BLE001
+                pass
+            bpy.ops.wm.save_as_mainfile(filepath=pub_path, copy=True)
+            workfile_rel = _project_rel(pub_path)
+            manifest = {
+                "dressing": dressing_name, "version": version,
+                "environment": env, "workfile_rel": workfile_rel,
+                "props": props,
+            }
+            manifest_path = pub_path[:-6] + ".manifest.json"
+            with open(manifest_path, "w") as fh:
+                json.dump(manifest, fh, indent=2)
+            files = [pub_path, manifest_path]
+            kind = f"dressing '{dressing_name}': {len(props)} prop(s)"
         elif task.get("type") == "shot":
             # Publish only the elements the artist checked in the dialog (changed/new
             # are pre-checked). If there are animated elements but none are selected
@@ -1278,6 +1323,22 @@ def _fetch_existing_looks(task_id):
         return []
 
 
+_EXISTING_DRESSINGS = []   # this environment's published dressing names
+
+
+def dressing_name_search(self, context, edit_text):
+    """Suggest already-published dressing names (re-publish versions up) while
+    still letting the artist type a brand-new name."""
+    et = (edit_text or "").lower()
+    return ([n for n in _EXISTING_DRESSINGS if et in n.lower()]
+            or list(_EXISTING_DRESSINGS))
+
+
+def _fetch_existing_dressings(task_id):
+    rows = _shell_json(["list-dressings", "--task", task_id]) or []
+    return [d["dressing"] for d in rows if d.get("dressing")]
+
+
 _HDRI_ITEMS = []   # kept referenced so Blender's EnumProperty doesn't GC the strings
 
 
@@ -1632,18 +1693,16 @@ def _element_holder(context, element_id):
     return holder
 
 
-def _link_asset_element(context, element):
-    """LINK the asset's published collection and make a poseable library override,
-    placed under the element's holder collection. Returns (holder, error)."""
-    blend = element.get("blend_local")
-    if not blend or not os.path.isfile(blend):
+def _link_collection_override(context, blend_local, coll_name, holder):
+    """LINK a named collection from a published .blend and make a fully-editable
+    library override nested under `holder`. The core loader shared by shot
+    elements, environment loading and set-dressing props.
+    Returns (override_collection, error)."""
+    if not blend_local or not os.path.isfile(blend_local):
         return None, "publish not found locally"
-    coll_name = element.get("collection") or ""
-    holder = _element_holder(context, element["id"])
-
     # Link the named collection (fall back to the file's first collection for
     # pre-collection publishes).
-    with bpy.data.libraries.load(blend, link=True, relative=True) as (src, dst):
+    with bpy.data.libraries.load(blend_local, link=True, relative=True) as (src, dst):
         if coll_name and coll_name in src.collections:
             dst.collections = [coll_name]
         elif src.collections:
@@ -1654,14 +1713,14 @@ def _link_asset_element(context, element):
     if linked is None:
         return None, "no linkable collection (republish the rig/model)"
 
-    # Build a full, editable override hierarchy so the rig is poseable.
+    # Build a full, editable override hierarchy so the content is poseable/movable.
     try:
         override = linked.override_hierarchy_create(
             context.scene, context.view_layer, do_fully_editable=True)
     except Exception as exc:  # noqa: BLE001
         return None, f"override failed: {exc}"
 
-    # Relocate the override collection under the element holder.
+    # Relocate the override collection under the holder.
     sc = context.scene.collection
     try:
         if override.name in sc.children:
@@ -1670,7 +1729,159 @@ def _link_asset_element(context, element):
             holder.children.link(override)
     except Exception:  # noqa: BLE001
         pass
+    return override, None
+
+
+def _link_asset_element(context, element):
+    """LINK the asset's published collection and make a poseable library override,
+    placed under the element's holder collection. Returns (holder, error)."""
+    holder = _element_holder(context, element["id"])
+    override, err = _link_collection_override(
+        context, element.get("blend_local"), element.get("collection") or "", holder)
+    if err:
+        return None, err
     return holder, None
+
+
+# --- set-dressing workspace ---------------------------------------------------
+
+def _named_holder(context, name):
+    """A scene collection by exact name (created + linked if absent)."""
+    holder = bpy.data.collections.get(name)
+    if holder is None:
+        holder = bpy.data.collections.new(name)
+    if holder.name not in context.scene.collection.children:
+        context.scene.collection.children.link(holder)
+    return holder
+
+
+def _fetch_publish_path(task_id, step):
+    """Shell `fetch-publish` and return the downloaded local path, or None."""
+    cmd, td = _toolkit_cmd(["fetch-publish", "--task", task_id, "--step", step])
+    if cmd is None:
+        return None
+    try:
+        out = subprocess.check_output(cmd, cwd=td, text=True).strip()
+        return out.splitlines()[-1] if out else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _project_rel(path):
+    return dressing_mod.rel_from_local(path, os.environ.get("FLUMEN_PROJECT_ROOT", ""))
+
+
+class FLUMEN_OT_build_dressing(bpy.types.Operator):
+    bl_idname = "flumen.build_dressing"
+    bl_label = "Load environment"
+    bl_description = ("Link the environment's published model (library override) "
+                      "under an environment__ holder, ready for set-dressing")
+
+    def execute(self, context):
+        task = active_task()
+        if not task or task.get("type") != "asset" or task.get("step") != "dressing":
+            self.report({"ERROR"}, "No active dressing task — open the "
+                                   "environment's dressing task from the Workspace app.")
+            return {"CANCELLED"}
+        leaf = (task.get("entity") or "").split("/")[-1]
+        holder_name = dressing_mod.ENV_HOLDER_PREFIX + leaf
+        if bpy.data.collections.get(holder_name) is not None:
+            self.report({"INFO"}, "Environment already loaded.")
+            return {"FINISHED"}
+
+        blend = os.environ.get("FLUMEN_MODEL_PUBLISH")
+        if not blend or not os.path.isfile(blend):
+            blend = _fetch_publish_path(task["id"], "model")
+        if not blend or not os.path.isfile(blend):
+            self.report({"ERROR"}, "No published model for this environment — "
+                                   "publish the model step first.")
+            return {"CANCELLED"}
+
+        holder = _named_holder(context, holder_name)
+        override, err = _link_collection_override(context, blend, leaf, holder)
+        if err:
+            self.report({"ERROR"}, f"Could not load the environment: {err}")
+            return {"CANCELLED"}
+        holder["flumen_env_asset"] = task.get("entity", "")
+        holder["flumen_env_step"] = "model"
+        holder["flumen_env_blend_rel"] = _project_rel(blend)
+        self.report({"INFO"}, f"Environment loaded from {os.path.basename(blend)} "
+                              f"— add props and publish a dressing.")
+        return {"FINISHED"}
+
+
+# 'Add prop' dropdown items — cached (Blender enum-callback GC pitfall, same as
+# _STEP_ENUM_CACHE) and refreshed on each invoke.
+_PROP_CHOICES: list[tuple] = [("__none__", "(no published assets)", "")]
+
+
+def _prop_enum_items(self, context):
+    return _PROP_CHOICES
+
+
+class FLUMEN_OT_add_prop(bpy.types.Operator):
+    bl_idname = "flumen.add_prop"
+    bl_label = "Add prop…"
+    bl_description = ("Place a published asset into the dressing: linked + "
+                      "overridable, parented under a prop_root__ empty that "
+                      "carries the transform the manifest publishes")
+
+    prop_choice: bpy.props.EnumProperty(name="Asset", items=_prop_enum_items)
+
+    def invoke(self, context, event):
+        global _PROP_CHOICES
+        rows = _shell_json(["list-asset-publishes", "--step", "model"]) or []
+        items = [(json.dumps(r), r["entity"], r["blend_rel"]) for r in rows]
+        _PROP_CHOICES = items or [("__none__", "(no published assets)", "")]
+        return context.window_manager.invoke_props_dialog(self, width=380)
+
+    def draw(self, context):
+        self.layout.prop(self, "prop_choice")
+
+    def execute(self, context):
+        if self.prop_choice == "__none__":
+            self.report({"ERROR"}, "No published assets to place.")
+            return {"CANCELLED"}
+        row = json.loads(self.prop_choice)
+        entity, step = row["entity"], row.get("step", "model")
+        leaf = entity.split("/")[-1]
+        task_id = f"asset-{entity.replace('/', '_')}-{step}"
+
+        blend = _fetch_publish_path(task_id, step)
+        if not blend or not os.path.isfile(blend):
+            self.report({"ERROR"}, f"Could not fetch the {step} publish of {entity}.")
+            return {"CANCELLED"}
+
+        existing = {o.get("flumen_prop_id") or
+                    o.name[len(dressing_mod.PROP_ROOT_PREFIX):]
+                    for o in bpy.data.objects
+                    if o.name.startswith(dressing_mod.PROP_ROOT_PREFIX)}
+        pid = dressing_mod.prop_id_for(leaf, existing)
+
+        holder = _named_holder(context, dressing_mod.PROP_HOLDER_PREFIX + pid)
+        override, err = _link_collection_override(context, blend, leaf, holder)
+        if err:
+            self.report({"ERROR"}, f"Could not place {entity}: {err}")
+            return {"CANCELLED"}
+
+        # The LOCAL empty that owns the placement: artists move THIS. Its world
+        # matrix is what the dressing manifest records — never override data.
+        root = bpy.data.objects.new(dressing_mod.PROP_ROOT_PREFIX + pid, None)
+        root.empty_display_type = "PLAIN_AXES"
+        root.empty_display_size = 0.5
+        root["flumen_prop_id"] = pid
+        root["flumen_prop_asset"] = entity
+        root["flumen_prop_step"] = step
+        root["flumen_prop_blend_rel"] = row.get("blend_rel") or _project_rel(blend)
+        root["flumen_prop_collection"] = leaf
+        holder.objects.link(root)
+        root.location = context.scene.cursor.location
+        for o in override.all_objects:
+            if o.parent is None and o is not root:
+                o.parent = root
+        self.report({"INFO"}, f"Placed {entity} as {root.name} — move the empty, "
+                              f"then publish the dressing.")
+        return {"FINISHED"}
 
 
 def _animated_paths(obj):
@@ -2308,6 +2519,8 @@ CLASSES = (
     FLUMEN_OT_check,
     FLUMEN_PublishItem,             # PropertyGroup — register before the operator
     FLUMEN_OT_publish,
+    FLUMEN_OT_build_dressing,
+    FLUMEN_OT_add_prop,
     FLUMEN_OT_publish_upload,
     FLUMEN_OT_load_model,
     FLUMEN_OT_apply_look,

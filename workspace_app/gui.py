@@ -1550,7 +1550,8 @@ class MainWindow(QMainWindow):
                     core.remote_path_for(remote_root, blend_rel), open_file))
             # Surface/rig shade or rig the published model — pre-fetch it so the
             # "Load published model" button (and auto-load) work offline-fast.
-            if task.get("step") in ("surface", "rig") and task.get("type") == "asset":
+            if (task.get("step") in ("surface", "rig", "dressing")
+                    and task.get("type") == "asset"):
                 mp = self._fetch_model_publish(task, local_root, remote_root)
                 if mp:
                     extra_env["FLUMEN_MODEL_PUBLISH"] = mp
