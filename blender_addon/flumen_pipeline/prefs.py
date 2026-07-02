@@ -15,7 +15,9 @@ class FlumenPipelinePrefs(bpy.types.AddonPreferences):
         description="Stored in Blender preferences (not encrypted). For shared "
                     "machines, leave blank and enter per session.")
     remote_root: bpy.props.StringProperty(
-        name="Remote Root", default="/shared/Flumen")
+        name="Remote Root", default="",
+        description="The project root on the server (e.g. /shared/<ProjectName>). "
+                    "Set automatically when launched via the Workspace app.")
     local_root: bpy.props.StringProperty(
         name="Local Project Root", subtype="DIR_PATH", default="",
         description="Where the project is synced on this machine. Usually set "

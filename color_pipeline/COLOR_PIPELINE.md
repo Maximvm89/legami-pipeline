@@ -55,7 +55,7 @@ Guarantees everyone uses the exact same color, even across Blender builds.
 
 2. Put it in the project so it ships with the show:
    upload the `.ocio` file (and the `config.ocio` link) to
-   `/shared/Flumen/02_pipeline/ocio/`.
+   `/shared/<Project>/02_pipeline/ocio/`.
 
 3. Each artist points Blender at their local synced copy via an environment
    variable **before launching Blender**:

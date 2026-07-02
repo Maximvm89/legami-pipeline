@@ -8,8 +8,8 @@ is loaded via a cross-platform launcher.
 
 | Piece | Where | Job |
 |---|---|---|
-| `project_settings.json` | FTP: `/shared/Flumen/02_pipeline/` | Single source of truth for all Blender settings. TD edits this. |
-| OCIO config | FTP: `/shared/Flumen/02_pipeline/ocio/config.ocio` | The pinned ACES color config. |
+| `project_settings.json` | FTP: `/shared/<Project>/02_pipeline/` | Single source of truth for all Blender settings. TD edits this. |
+| OCIO config | FTP: `/shared/<Project>/02_pipeline/ocio/config.ocio` | The pinned ACES color config. |
 | Launcher | `flumen launch` + `launcher/` wrappers | Syncs the above from FTP, sets `BLENDER_OCIO`, starts Blender. |
 | Addon `flumen_pipeline` | installed in Blender | Applies the settings to the scene; per-user FTP login for future tools. |
 
