@@ -413,3 +413,106 @@ def test_list_asset_publishes_json(monkeypatch, capsys):
     assert out == [{"entity": "props/lantern", "step": "model",
                     "blend_rel": "03_assets/props/lantern/model/publish/"
                                  "lantern_model_v002.blend"}]
+
+
+def _seed_env_with_dressing(srv):
+    """Env asset with a model publish + a dressing task with a v002 manifest."""
+    import json as _json
+    env = "environments/market_square"
+    tasks.save_task(srv, "/r", tasks.new_task("asset", env, "model"))
+    tasks.publish_task(srv, "/r", "marco", ["/tmp/market_square_model_v004.blend"],
+                       tasks.make_id("asset", env, "model"))
+    dt = tasks.save_task(srv, "/r", tasks.new_task("asset", env, "dressing"))
+    pub = "03_assets/environments/market_square/dressing/publish/"
+    dt["publishes"] = [
+        {"files": [pub + "market_square_dressing_night_market_v002.blend",
+                   pub + "market_square_dressing_night_market_v002.manifest.json"],
+         "time": 2, "by": "leo"}]
+    tasks.save_task(srv, "/r", dt)
+    manifest = {"dressing": "night_market", "version": 2,
+                "environment": {"asset": env, "source_step": "model",
+                                "blend_rel": "x/m_v004.blend"},
+                "props": [
+                    {"id": "lantern", "asset": "props/lantern",
+                     "source_step": "model",
+                     "blend_rel": "03_assets/props/lantern/model/publish/"
+                                  "lantern_model_v002.blend",
+                     "collection": "lantern", "object": "prop_root__lantern",
+                     "matrix_world": [[1, 0, 0, 2.5], [0, 1, 0, 0],
+                                      [0, 0, 1, 0], [0, 0, 0, 1]]},
+                    {"id": "lantern_2", "asset": "props/lantern",
+                     "source_step": "model",
+                     "blend_rel": "03_assets/props/lantern/model/publish/"
+                                  "lantern_model_v002.blend",
+                     "collection": "lantern", "object": "prop_root__lantern_2",
+                     "matrix_world": [[1, 0, 0, -2.5], [0, 1, 0, 0],
+                                      [0, 0, 1, 0], [0, 0, 0, 1]]}]}
+    srv.write_text("/r/" + pub + "market_square_dressing_night_market_v002.manifest.json",
+                   _json.dumps(manifest))
+    return env
+
+
+def test_resolve_assembly_inlines_dressing_props(monkeypatch, capsys, tmp_path):
+    import json
+    from flumen import turntable, elements as E
+    monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
+    srv = _DownloadSrv()
+    env = _seed_env_with_dressing(srv)
+    shot = "SEQ010/SH0010"
+    shot_task = tasks.save_task(srv, "/r", tasks.new_task("shot", shot, "layout"))
+    asm = E.empty_assembly(shot)
+    E.add_element(asm, E.new_element(env, dressing="night_market"))
+    E.save_assembly(srv, "/r", shot, asm)
+
+    _patch(monkeypatch, srv, local_root=str(tmp_path))
+    rc = cli.cmd_resolve_assembly(_args(task=shot_task["id"], shot=None, step=None,
+                                        list=False, only=[], pick=[]))
+    assert rc == 0
+    res = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    el = res["elements"][0]
+    d = el["dressing"]
+    assert d["name"] == "night_market" and d["version"] == 2
+    assert [p["id"] for p in d["props"]] == ["lantern", "lantern_2"]
+    assert d["props"][0]["blend_local"].endswith("lantern_model_v002.blend")
+    assert d["props"][0]["matrix_world"][0][3] == 2.5
+    # the shared prop blend is downloaded once (deduped), not per instance
+    lantern_dls = [r for r, _ in srv.downloads
+                   if r.endswith("lantern_model_v002.blend")]
+    assert len(lantern_dls) == 1
+
+    # --list embeds only name+version, no prop downloads
+    srv.downloads.clear()
+    rc = cli.cmd_resolve_assembly(_args(task=shot_task["id"], shot=None, step=None,
+                                        list=True, only=[], pick=[]))
+    assert rc == 0
+    res = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    d = res["elements"][0]["dressing"]
+    assert d == {"name": "night_market", "version": 2}
+    assert not srv.downloads
+
+
+def test_resolve_assembly_missing_dressing_warns_not_fatal(monkeypatch, capsys,
+                                                           tmp_path):
+    import json
+    from flumen import turntable, elements as E
+    monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
+    srv = _DownloadSrv()
+    env = "environments/market_square"
+    tasks.save_task(srv, "/r", tasks.new_task("asset", env, "model"))
+    tasks.publish_task(srv, "/r", "marco", ["/tmp/market_square_model_v004.blend"],
+                       tasks.make_id("asset", env, "model"))
+    shot = "SEQ010/SH0010"
+    shot_task = tasks.save_task(srv, "/r", tasks.new_task("shot", shot, "layout"))
+    asm = E.empty_assembly(shot)
+    E.add_element(asm, E.new_element(env, dressing="never_published"))
+    E.save_assembly(srv, "/r", shot, asm)
+
+    _patch(monkeypatch, srv, local_root=str(tmp_path))
+    rc = cli.cmd_resolve_assembly(_args(task=shot_task["id"], shot=None, step=None,
+                                        list=False, only=[], pick=[]))
+    assert rc == 0                                        # never fatal
+    res = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    el = res["elements"][0]
+    assert el["blend_local"]                              # env still resolves
+    assert "never_published" in el["dressing_error"]
+    assert "dressing" not in el or not isinstance(el.get("dressing"), dict)

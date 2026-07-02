@@ -281,3 +281,40 @@ def test_published_animations_lists_all_versions_with_elements():
 
 def test_anim_version_label():
     assert E.anim_version_label("SH0010_layout_v007_anim.blend") == "v007"
+
+
+def test_element_dressing_field_round_trip():
+    e = E.new_element("environments/market_square", "asset",
+                      dressing="night_market")
+    assert e["dressing"] == "night_market"
+    # old assemblies without the field normalize cleanly to ""
+    asm = {"shot": "SEQ010/SH0010",
+           "elements": [{"id": "env", "kind": "asset",
+                         "asset": "environments/market_square"},
+                        {"id": "cam", "kind": "camera",
+                         "dressing": "bogus"}]}   # cameras never carry a dressing
+    out = E.normalize(asm)
+    env = next(x for x in out["elements"] if x["id"] == "env")
+    cam = next(x for x in out["elements"] if x["id"] == "cam")
+    assert env["dressing"] == "" and cam["dressing"] == ""
+
+
+def test_newest_dressing_resolves_named_version():
+    from test_tasks import FakeSrv
+    from flumen import tasks
+    srv = FakeSrv()
+    dt = tasks.save_task(srv, "/r",
+                         tasks.new_task("asset", "environments/market_square",
+                                        "dressing"))
+    pub = "03_assets/environments/market_square/dressing/publish/"
+    dt["publishes"] = [
+        {"files": [pub + "market_square_dressing_night_market_v001.blend"], "time": 1},
+        {"files": [pub + "market_square_dressing_night_market_v002.blend"], "time": 2},
+        {"files": [pub + "market_square_dressing_day_v001.blend"], "time": 3},
+    ]
+    tasks.save_task(srv, "/r", dt)
+    d = E.newest_dressing(srv, "/r", "environments/market_square", "night_market")
+    assert d["version"] == 2 and d["blend_rel"].endswith("_v002.blend")
+    assert d["manifest_rel"].endswith("_v002.manifest.json")
+    assert E.newest_dressing(srv, "/r", "environments/market_square", "nope") is None
+    assert E.newest_dressing(srv, "/r", "environments/other", "day") is None

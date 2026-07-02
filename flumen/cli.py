@@ -703,7 +703,8 @@ def cmd_assembly_add(args) -> int:
     if kind == "asset" and not args.asset:
         print("error: --asset required (or use --camera)", file=sys.stderr)
         return 1
-    el = E.new_element(args.asset or "", kind, args.label or "", args.look or "")
+    el = E.new_element(args.asset or "", kind, args.label or "", args.look or "",
+                       dressing=getattr(args, "dressing", "") or "")
     with SFTPClient(creds) as client:
         asm = E.load_assembly(client, cfg.remote_root, args.shot)
         E.add_element(asm, el)
@@ -774,13 +775,48 @@ def cmd_resolve_assembly(args) -> int:
                 local = os.path.join(local_root, *rel.split("/"))
                 client.download(rr + "/" + rel, local)
             collection = "" if r["kind"] == "camera" else r["asset"].split("/")[-1]
-            out.append({"id": r["id"], "label": r["label"], "kind": r["kind"],
-                        "asset": r["asset"], "blend_local": local,
-                        "source_step": r["source_step"], "collection": collection,
-                        "available_steps": r.get("available_steps", []),
-                        "look": r.get("look", ""), "load": r.get("load", "link"),
-                        "apply_look": r.get("apply_look", False),
-                        "camera_name": r.get("camera_name", "")})
+            entry = {"id": r["id"], "label": r["label"], "kind": r["kind"],
+                     "asset": r["asset"], "blend_local": local,
+                     "source_step": r["source_step"], "collection": collection,
+                     "available_steps": r.get("available_steps", []),
+                     "look": r.get("look", ""), "load": r.get("load", "link"),
+                     "apply_look": r.get("apply_look", False),
+                     "camera_name": r.get("camera_name", "")}
+            # Environment element with a named set-dressing: resolve the newest
+            # published version of that name, inline its manifest and fetch each
+            # prop's publish so Build shot only has to link + place.
+            if r.get("dressing"):
+                d = E.newest_dressing(client, rr, r["asset"], r["dressing"])
+                if not d:
+                    entry["dressing_error"] = (f"no published dressing "
+                                               f"'{r['dressing']}' on {r['asset']}")
+                elif args.list:
+                    entry["dressing"] = {"name": r["dressing"],
+                                         "version": d["version"]}
+                else:
+                    txt = client.read_text(rr + "/" + d["manifest_rel"])
+                    try:
+                        manifest = json.loads(txt) if txt else {}
+                    except ValueError:
+                        manifest = {}
+                    props, fetched = [], {}
+                    for p in manifest.get("props") or []:
+                        brel = p.get("blend_rel") or ""
+                        if not brel:
+                            continue
+                        if brel not in fetched:
+                            lp = os.path.join(local_root, *brel.split("/"))
+                            client.download(rr + "/" + brel, lp)
+                            fetched[brel] = lp
+                        props.append({"id": p.get("id", ""),
+                                      "asset": p.get("asset", ""),
+                                      "blend_local": fetched[brel],
+                                      "collection": p.get("collection", ""),
+                                      "object": p.get("object", ""),
+                                      "matrix_world": p.get("matrix_world")})
+                    entry["dressing"] = {"name": r["dressing"],
+                                         "version": d["version"], "props": props}
+            out.append(entry)
 
         # The shot's published animation (Actions) — Build shot re-applies it onto the
         # freshly-linked rigs. Resolved PER ELEMENT to its newest version, so each
@@ -1065,6 +1101,8 @@ def build_parser() -> argparse.ArgumentParser:
     aa.add_argument("--label", default="", help="display label (default: asset name)")
     aa.add_argument("--look", default="",
                     help="surface look name to apply downstream (lighting)")
+    aa.add_argument("--dressing", default="",
+                    help="published set-dressing to load with an environment")
     aa.set_defaults(func=cmd_assembly_add)
 
     ar = asm_sub.add_parser("remove", parents=[common],

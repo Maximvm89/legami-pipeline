@@ -1810,6 +1810,55 @@ class FLUMEN_OT_build_dressing(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _apply_dressing_props(context, element_holder, element):
+    """Place a resolved set-dressing's props under a shot element's holder: link
+    each prop's published collection (override), create the placement empty at the
+    manifest transform, parent the roots to it. Additive: a prop whose sub-holder
+    already exists is skipped, so re-running Build shot never duplicates.
+    Returns (built_count, skipped_count)."""
+    import mathutils
+    payload = element.get("dressing") or {}
+    built = skipped = 0
+    for p in payload.get("props") or []:
+        pid = p.get("id") or "prop"
+        sub_name = (dressing_mod.PROP_HOLDER_PREFIX
+                    + f"{element.get('id', 'el')}__{pid}")
+        if bpy.data.collections.get(sub_name) is not None:
+            skipped += 1                       # additive rebuild: already placed
+            continue
+        sub = bpy.data.collections.new(sub_name)
+        element_holder.children.link(sub)
+        override, err = _link_collection_override(
+            context, p.get("blend_local"), p.get("collection") or "", sub)
+        if err:
+            print(f"[Flumen] dressing prop '{pid}' failed: {err}")
+            try:
+                element_holder.children.unlink(sub)
+                bpy.data.collections.remove(sub)
+            except Exception:  # noqa: BLE001
+                pass
+            skipped += 1
+            continue
+        root = bpy.data.objects.new(
+            p.get("object") or dressing_mod.PROP_ROOT_PREFIX + pid, None)
+        root.empty_display_type = "PLAIN_AXES"
+        root.empty_display_size = 0.5
+        root["flumen_prop_id"] = pid
+        root["flumen_prop_asset"] = p.get("asset", "")
+        sub.objects.link(root)
+        rows = p.get("matrix_world")
+        if rows:
+            try:
+                root.matrix_world = mathutils.Matrix(rows)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Flumen] dressing prop '{pid}': bad matrix ({exc})")
+        for o in override.all_objects:
+            if o.parent is None and o is not root:
+                o.parent = root
+        built += 1
+    return built, skipped
+
+
 # 'Add prop' dropdown items — cached (Blender enum-callback GC pitfall, same as
 # _STEP_ENUM_CACHE) and refreshed on each invoke.
 _PROP_CHOICES: list[tuple] = [("__none__", "(no published assets)", "")]
@@ -2173,7 +2222,13 @@ def _element_detail(el, present):
         return ("new Dolly camera rig" if el.get("load") == "create_rig"
                 else "shot camera (published)")
     src = el.get("source_step") or "?"
-    return f"link {src}"
+    detail = f"link {src}"
+    d = el.get("dressing")
+    if isinstance(d, dict) and d.get("name"):
+        detail += f" + dressing '{d['name']}'"
+    if el.get("dressing_error"):
+        detail += f" (! {el['dressing_error']})"
+    return detail
 
 
 # Dynamic per-row step dropdown. The enum items are derived from each row's
@@ -2321,7 +2376,7 @@ class FLUMEN_OT_build_shot(bpy.types.Operator):
         # Per-element animation: each element resolves to its own newest version.
         anim_elements = ((data or {}).get("anim") or {}).get("elements") or {}
 
-        built, skipped, animated = [], [], 0
+        built, skipped, animated, dressed = [], [], 0, 0
         for el in elements:
             loader = _ELEMENT_LOADERS.get(el.get("kind"))
             if loader is None:
@@ -2336,6 +2391,21 @@ class FLUMEN_OT_build_shot(bpy.types.Operator):
                 # Stamp the holder so the playblast HUD can show what's in the shot.
                 holder["flumen_step"] = ("camera" if el.get("kind") == "camera"
                                          else el.get("source_step", ""))
+            # Environment element with a set-dressing: link each manifest prop
+            # under the holder and place it at its published transform.
+            dressing = el.get("dressing")
+            if holder and isinstance(dressing, dict) and dressing.get("props"):
+                d_built, d_skipped = _apply_dressing_props(context, holder, el)
+                if d_built:
+                    holder["flumen_dressing"] = (f"{dressing.get('name', '')} "
+                                                 f"v{dressing.get('version', 0):03d}")
+                    dressed += d_built
+                if d_skipped:
+                    print(f"[Flumen] dressing: {d_skipped} prop(s) skipped "
+                          f"(already present or failed) on {el.get('id')}")
+            if el.get("dressing_error"):
+                print(f"[Flumen] dressing warning ({el.get('id')}): "
+                      f"{el['dressing_error']}")
             # Re-apply this element's published animation (its own newest version).
             ael = anim_elements.get(el.get("id"))
             if holder and ael and ael.get("blend_local") and ael.get("objects"):
@@ -2353,6 +2423,8 @@ class FLUMEN_OT_build_shot(bpy.types.Operator):
             pass
 
         parts = [f"Built {len(built)} element(s)"]
+        if dressed:
+            parts.append(f"placed {dressed} dressing prop(s)")
         if animated:
             parts.append(f"re-applied animation to {animated} object(s)")
         if tl_msg:

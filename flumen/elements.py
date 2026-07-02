@@ -72,15 +72,17 @@ def element_id_for(seed: str, existing_ids) -> str:
 # ---- pure: element / assembly construction ---------------------------------
 
 def new_element(asset_entity: str, kind: str = "asset",
-                label: str = "", look: str = "") -> dict:
+                label: str = "", look: str = "", dressing: str = "") -> dict:
     """A fresh element dict (id is assigned by add_element). A camera element
-    carries no asset entity."""
+    carries no asset entity. `dressing` names a published set-dressing to load
+    with an environment element (like `look`, resolved to newest at build)."""
     if kind not in KINDS:
         raise ValueError(f"unknown element kind: {kind}")
     asset = "" if kind == "camera" else (asset_entity or "")
     label = label or (asset.split("/")[-1] if asset else "camera")
     return {"id": "", "kind": kind, "asset": asset,
-            "label": label, "look": look or "", "enabled": True}
+            "label": label, "look": look or "", "dressing": dressing or "",
+            "enabled": True}
 
 
 def empty_assembly(shot_entity: str) -> dict:
@@ -133,6 +135,7 @@ def normalize(assembly: dict, shot_entity: str = "") -> dict:
         e = {"id": raw.get("id", ""), "kind": kind,
              "asset": "" if kind == "camera" else raw.get("asset", ""),
              "label": raw.get("label", ""), "look": raw.get("look", ""),
+             "dressing": "" if kind == "camera" else raw.get("dressing", ""),
              "enabled": bool(raw.get("enabled", True))}
         if not e["id"] or e["id"] in seen:
             # Keep the original id (or asset) as the collision base so a dup
@@ -262,9 +265,29 @@ def resolved_elements(sftp, remote_root: str, shot_entity: str, step: str,
         out.append({"id": e["id"], "label": e["label"], "kind": "asset",
                     "asset": e["asset"], "blend_rel": rels[chosen],
                     "source_step": chosen, "available_steps": avail,
-                    "look": e.get("look", ""), "load": spec.get("load", "link"),
+                    "look": e.get("look", ""),
+                    "dressing": e.get("dressing", ""),
+                    "load": spec.get("load", "link"),
                     "apply_look": bool(spec.get("apply_look", False))})
     return out
+
+
+def newest_dressing(sftp, remote_root: str, asset_entity: str,
+                    dressing_name: str) -> dict | None:
+    """The newest published version of a NAMED set-dressing on an environment
+    asset: {blend_rel, manifest_rel, version} or None. Resolved at build time so
+    a shot always gets the latest layout of the chosen dressing."""
+    from . import tasks
+    task_id = tasks.make_id("asset", asset_entity, "dressing")
+    t = tasks.get_task(sftp, remote_root, task_id)
+    if not t:
+        return None
+    for d in tasks.published_dressings(t):
+        if d["dressing"] == dressing_name:
+            return {"blend_rel": d["blend_rel"],
+                    "manifest_rel": d["manifest_rel"],
+                    "version": d["version"]}
+    return None
 
 
 ANIM_BLEND_SUFFIX = "_anim.blend"

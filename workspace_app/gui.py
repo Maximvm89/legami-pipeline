@@ -1451,9 +1451,11 @@ class MainWindow(QMainWindow):
         asset_entities = sorted({t["entity"] for t in self._tasks
                                  if t.get("type") == "asset"})
 
-        def done(assembly):
+        def done(result):
+            assembly, dressings_by_asset = result
             self._busy_buttons(False)
-            dlg = ElementsDialog(shot_entity, assembly, asset_entities, self)
+            dlg = ElementsDialog(shot_entity, assembly, asset_entities, self,
+                                 dressings_by_asset=dressings_by_asset)
             if dlg.exec() != QDialog.Accepted:
                 return
             new_assembly = dlg.assembly()
@@ -1472,11 +1474,24 @@ class MainWindow(QMainWindow):
                                 f"for {shot_entity}.")),
                 busy_msg="Saving elements…")
 
+        def load_work():
+            assembly = self._conn_do(
+                lambda c: elementsmod.load_assembly(c, remote, shot_entity))
+            # Published dressing names per environment asset (for the dropdown).
+            dressings = {}
+            for ent in asset_entities:
+                if not ent.startswith("environments/"):
+                    continue
+                tid = tasksmod.make_id("asset", ent, "dressing")
+                t = self._conn_do(lambda c, x=tid: tasksmod.get_task(c, remote, x))
+                if t:
+                    names = [d["dressing"] for d in tasksmod.published_dressings(t)]
+                    if names:
+                        dressings[ent] = names
+            return assembly, dressings
+
         self._busy_buttons(True)
-        self._spawn(
-            lambda: self._conn_do(
-                lambda c: elementsmod.load_assembly(c, remote, shot_entity)),
-            done, busy_msg="Loading elements…")
+        self._spawn(load_work, done, busy_msg="Loading elements…")
 
     def _show_history(self, task: dict):
         import datetime as _dt
@@ -1883,11 +1898,13 @@ class ElementsDialog(QDialog):
     """Edit a shot's element breakdown. Pure UI over an in-memory assembly dict;
     the caller saves it via elements.save_assembly. No network here."""
 
-    def __init__(self, shot_entity, assembly, asset_entities, parent=None):
+    def __init__(self, shot_entity, assembly, asset_entities, parent=None,
+                 dressings_by_asset=None):
         super().__init__(parent)
         from flumen import elements as E
         self._E = E
         self._asset_entities = list(asset_entities or [])
+        self._dressings = dict(dressings_by_asset or {})
         self._assembly = E.normalize(dict(assembly), shot_entity)
         self.setWindowTitle(f"Elements — {shot_entity}")
         self.setMinimumWidth(560)
@@ -1896,9 +1913,9 @@ class ElementsDialog(QDialog):
             "Assets this shot contains. Layout links each one's rig; lighting will "
             "load its cache (later). The camera is the shot's own published camera."))
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(["On", "Kind", "Asset / Camera",
-                                              "Look", "Id"])
+                                              "Look", "Dressing", "Id"])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -1907,16 +1924,23 @@ class ElementsDialog(QDialog):
         add_row = QHBoxLayout()
         self.cb_asset = QComboBox()
         self.cb_asset.addItems(self._asset_entities)
+        self.cb_asset.currentTextChanged.connect(self._refresh_dressing_choices)
         self.ed_look = QLineEdit()
         self.ed_look.setPlaceholderText("look (optional)")
+        # Dressing choice — only meaningful for environments with published
+        # dressings; disabled otherwise.
+        self.cb_dressing = QComboBox()
+        self.cb_dressing.setToolTip("Published set-dressing to load with this "
+                                    "environment (optional)")
         b_add = QPushButton("Add asset")
         b_add.clicked.connect(self._add_asset)
         b_cam = QPushButton("Add camera")
         b_cam.clicked.connect(self._add_camera)
         b_rm = QPushButton("Remove selected")
         b_rm.clicked.connect(self._remove_selected)
-        for w in (self.cb_asset, self.ed_look, b_add, b_cam):
+        for w in (self.cb_asset, self.ed_look, self.cb_dressing, b_add, b_cam):
             add_row.addWidget(w)
+        self._refresh_dressing_choices()
         add_row.addStretch(1)
         add_row.addWidget(b_rm)
         root.addLayout(add_row)
@@ -1951,7 +1975,7 @@ class ElementsDialog(QDialog):
             cb.setChecked(e.get("enabled", True))
             self.table.setCellWidget(i, 0, cb)
             cells = (e["kind"], e["asset"] or "(shot camera)",
-                     e.get("look", ""), e["id"])
+                     e.get("look", ""), e.get("dressing", ""), e["id"])
             for j, val in enumerate(cells, start=1):
                 self.table.setItem(i, j, QTableWidgetItem(val))
 
@@ -1960,13 +1984,23 @@ class ElementsDialog(QDialog):
         end = start + max(1, self.spin_duration.value()) - 1
         self.lbl_range.setText(f"→ frames {start}–{end}")
 
+    def _refresh_dressing_choices(self):
+        names = self._dressings.get(self.cb_asset.currentText().strip()) or []
+        self.cb_dressing.clear()
+        self.cb_dressing.addItem("")                 # no dressing
+        for n in names:
+            self.cb_dressing.addItem(n)
+        self.cb_dressing.setEnabled(bool(names))
+
     def _add_asset(self):
         ent = self.cb_asset.currentText().strip()
         if not ent:
             return
         self._E.add_element(self._assembly,
                             self._E.new_element(ent, "asset",
-                                                look=self.ed_look.text().strip()))
+                                                look=self.ed_look.text().strip(),
+                                                dressing=self.cb_dressing
+                                                .currentText().strip()))
         self.ed_look.clear()
         self._reload()
 
