@@ -129,6 +129,27 @@ def check_model(scene, objects, max_listed=5):
     return issues
 
 
+def fixable_scale_objects(objects):
+    """Triage unapplied-scale meshes for the auto-fixer (pure, duck-typed):
+    (fixable, shared, animated). Shared-mesh instances are NOT fixable — applying
+    scale bakes into the mesh data and would deform every other instance.
+    Keyframed objects are left alone — their scale may be intentional."""
+    fixable, shared, animated = [], [], []
+    for o in objects:
+        if getattr(o, "type", "") != "MESH":
+            continue
+        scale = tuple(round(float(v), 4) for v in getattr(o, "scale", (1, 1, 1)))
+        if scale == (1.0, 1.0, 1.0):
+            continue
+        if getattr(getattr(o, "data", None), "users", 1) > 1:
+            shared.append(o)
+        elif getattr(o, "animation_data", None) is not None:
+            animated.append(o)
+        else:
+            fixable.append(o)
+    return fixable, shared, animated
+
+
 def _descendants(objects, root):
     """All descendants of root among `objects` (pure; uses .parent references)."""
     children = {}

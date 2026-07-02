@@ -41,6 +41,7 @@ class FLUMEN_MT_menu(bpy.types.Menu):
                                 icon="ANIM_DATA")
             layout.operator("flumen.save_to_task", icon="FILE_TICK")
             layout.operator("flumen.run_checks", icon="CHECKMARK")
+            layout.operator("flumen.auto_fix", icon="TOOL_SETTINGS")
             layout.operator("flumen.publish", text="Publish…", icon="EXPORT")
             layout.separator()
         else:

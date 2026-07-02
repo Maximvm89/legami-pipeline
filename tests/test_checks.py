@@ -251,3 +251,22 @@ def test_model_unapplied_scale_aggregated():
     msg = scale_warns[0]
     assert "8 mesh(es)" in msg and "glass_0" in msg and "…and 3 more" in msg
     assert not checks.has_errors(issues)             # still just a warning
+
+
+def test_fixable_scale_objects_triage():
+    def mesh(name, scale=(0.5, 0.5, 0.5), users=1, anim=None):
+        data = types.SimpleNamespace(users=users)
+        return types.SimpleNamespace(type="MESH", name=name, scale=scale,
+                                     data=data, animation_data=anim,
+                                     material_slots=[], parent=None)
+    ok = mesh("plain")
+    inst = mesh("glass_instance", users=3)                    # shared mesh data
+    keyed = mesh("pulsing_light", anim=object())              # keyframed
+    clean = mesh("done", scale=(1.0, 1.0, 1.0))               # nothing to fix
+    empty = types.SimpleNamespace(type="EMPTY", name="PUBLISH",
+                                  scale=(2.0, 2.0, 2.0), parent=None)  # not a mesh
+    fixable, shared, animated = checks.fixable_scale_objects(
+        [ok, inst, keyed, clean, empty])
+    assert [o.name for o in fixable] == ["plain"]
+    assert [o.name for o in shared] == ["glass_instance"]
+    assert [o.name for o in animated] == ["pulsing_light"]

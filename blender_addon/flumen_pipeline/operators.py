@@ -675,9 +675,77 @@ class FLUMEN_OT_check(bpy.types.Operator):
         _draw_checks(self.layout, self._issues)
         if checks.has_errors(self._issues):
             self.layout.label(text="Errors would block a publish.", icon="CANCEL")
+        fixable, shared, _anim = checks.fixable_scale_objects(context.scene.objects)
+        if fixable or not _units_ok(context.scene):
+            self.layout.separator()
+            self.layout.operator("flumen.auto_fix", icon="TOOL_SETTINGS")
+        elif shared:
+            self.layout.label(text=f"{len(shared)} scale issue(s) are on shared "
+                                   f"meshes — not auto-fixable.", icon="INFO")
 
     def execute(self, context):
         return {"FINISHED"}  # informational only
+
+
+def _units_ok(scene):
+    us = getattr(scene, "unit_settings", None)
+    return (us is not None and getattr(us, "system", "") == "METRIC"
+            and abs(float(getattr(us, "scale_length", 1.0)) - 1.0) <= 1e-6)
+
+
+class FLUMEN_OT_auto_fix(bpy.types.Operator):
+    bl_idname = "flumen.auto_fix"
+    bl_label = "Auto-fix issues"
+    bl_description = ("Fix what can be fixed safely: set metric units and apply "
+                      "unapplied scales. Skips shared-mesh instances (fixing one "
+                      "would deform the others) and keyframed objects")
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        did = []
+        # 1) Units — two values, zero risk.
+        if not _units_ok(context.scene):
+            context.scene.unit_settings.system = "METRIC"
+            context.scene.unit_settings.scale_length = 1.0
+            did.append("units -> metric/1.0")
+        # 2) Unapplied scales — only single-user, non-animated meshes.
+        fixable, shared, animated = checks.fixable_scale_objects(
+            context.scene.objects)
+        applied = failed = 0
+        if fixable:
+            try:
+                with context.temp_override(
+                        selected_editable_objects=list(fixable),
+                        active_object=fixable[0]):
+                    bpy.ops.object.transform_apply(
+                        location=False, rotation=False, scale=True)
+                applied = len(fixable)
+            except Exception:  # noqa: BLE001 — fall back to one-by-one
+                for o in fixable:
+                    try:
+                        with context.temp_override(
+                                selected_editable_objects=[o], active_object=o):
+                            bpy.ops.object.transform_apply(
+                                location=False, rotation=False, scale=True)
+                        applied += 1
+                    except Exception as exc:  # noqa: BLE001
+                        failed += 1
+                        print(f"[Flumen] auto-fix: could not apply scale on "
+                              f"{o.name}: {exc}")
+        if applied:
+            did.append(f"applied scale on {applied} mesh(es)")
+        skipped = []
+        if shared:
+            skipped.append(f"{len(shared)} shared-mesh")
+        if animated:
+            skipped.append(f"{len(animated)} keyframed")
+        if failed:
+            skipped.append(f"{failed} failed")
+        msg = ("Fixed: " + "; ".join(did) if did else "Nothing to fix")
+        if skipped:
+            msg += "  (skipped: " + ", ".join(skipped) + " — see console)"
+        self.report({"INFO"}, msg + ". Re-run checks to confirm.")
+        return {"FINISHED"}
 
 
 def _wrap_publish_in_collection(context, coll_name, loc):
@@ -2637,6 +2705,7 @@ CLASSES = (
     FLUMEN_OT_publish,
     FLUMEN_OT_build_dressing,
     FLUMEN_OT_add_prop,
+    FLUMEN_OT_auto_fix,
     FLUMEN_OT_publish_upload,
     FLUMEN_OT_load_model,
     FLUMEN_OT_apply_look,
