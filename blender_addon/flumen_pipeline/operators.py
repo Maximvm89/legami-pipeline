@@ -495,12 +495,52 @@ def _collect_look(context):
     return materials, amap
 
 
-def _run_task_checks(step, context, ttype=None):
-    """run_checks with surface texture state injected for the surface step, and the
-    task type so shot publishes get the shot gate (camera + frame range)."""
+def _profile_stats(context, heavy_modifiers):
+    """Scene cost stats for the profiler (bpy side): polys/objects/textures/heavy
+    modifiers. Poly counts are base-mesh (pre-modifier) — that's why unapplied
+    heavy modifiers are flagged separately."""
+    heavy_set = set(heavy_modifiers or [])
+    poly_count = 0
+    heavy = []
+    objects = list(context.scene.objects)
+    for o in objects:
+        data = getattr(o, "data", None)
+        if getattr(o, "type", "") == "MESH" and data is not None:
+            try:
+                poly_count += len(data.polygons)
+            except Exception:  # noqa: BLE001
+                pass
+        for m in getattr(o, "modifiers", []) or []:
+            if getattr(m, "type", "") in heavy_set:
+                heavy.append((o.name, m.type))
+    textures = []
+    for img in _used_texture_images():
+        size = list(getattr(img, "size", None) or (0, 0))
+        textures.append({"name": getattr(img, "name", "?"),
+                         "width": int(size[0]), "height": int(size[1]),
+                         "channels": int(getattr(img, "channels", 4) or 4),
+                         "is_float": bool(getattr(img, "is_float", False))})
+    return {"poly_count": poly_count, "object_count": len(objects),
+            "textures": textures, "heavy_modifiers": heavy}
+
+
+def _run_task_checks(step, context, ttype=None, entity=""):
+    """run_checks with surface texture state injected for the surface step, the
+    task type so shot publishes get the shot gate (camera + frame range), and —
+    for profiled categories/steps (environments) — the WARN-only cost profile."""
     extra = _texture_check_records() if step == "surface" else None
+    profile_stats, profiling = None, None
+    if ttype == "asset" and entity:
+        root = settings_io.find_project_root(_pref_local_root())
+        settings = settings_io.load_settings(root) if root else {}
+        profiling = checks.profile_thresholds(settings)
+        if (entity.split("/")[0] in (profiling.get("apply_to_categories") or [])
+                and step in (profiling.get("apply_to_steps") or [])):
+            profile_stats = _profile_stats(
+                context, profiling.get("heavy_modifiers") or [])
     return checks.run_checks(step, context.scene, list(context.scene.objects),
-                             publish_locator_name(), textures=extra, ttype=ttype)
+                             publish_locator_name(), textures=extra, ttype=ttype,
+                             profile_stats=profile_stats, profiling=profiling)
 
 
 class FLUMEN_OT_turntable_framing(bpy.types.Operator):
@@ -626,7 +666,9 @@ class FLUMEN_OT_check(bpy.types.Operator):
     def invoke(self, context, event):
         task = active_task()
         step = task["step"] if task else ""
-        self._issues = _run_task_checks(step, context)
+        self._issues = _run_task_checks(step, context,
+                                        (task or {}).get("type"),
+                                        (task or {}).get("entity", ""))
         return context.window_manager.invoke_props_dialog(self, width=460)
 
     def draw(self, context):
@@ -769,7 +811,8 @@ class FLUMEN_OT_publish(bpy.types.Operator):
             self.report({"ERROR"}, "No active task. Open this scene from the "
                                    "Workspace app's 'Open in Blender'.")
             return {"CANCELLED"}
-        self._issues = _run_task_checks(task["step"], context, task.get("type"))
+        self._issues = _run_task_checks(task["step"], context, task.get("type"),
+                                        task.get("entity", ""))
         if task.get("step") == "surface":
             global _EXISTING_LOOKS
             _EXISTING_LOOKS = _fetch_existing_looks(task["id"])
@@ -822,7 +865,8 @@ class FLUMEN_OT_publish(bpy.types.Operator):
             self.report({"ERROR"}, "No active task.")
             return {"CANCELLED"}
 
-        issues = _run_task_checks(task["step"], context, task.get("type"))
+        issues = _run_task_checks(task["step"], context, task.get("type"),
+                                  task.get("entity", ""))
         if checks.has_errors(issues):
             errs = [m for lvl, m in issues if lvl == checks.ERROR]
             self.report({"ERROR"}, "Publish blocked: " + errs[0])

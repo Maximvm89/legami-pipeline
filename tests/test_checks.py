@@ -159,3 +159,81 @@ def test_run_checks_shot_skips_publish_locator():
     # a shot has no PUBLISH locator; the shot gate must not demand one
     issues = checks.run_checks("layout", _shot_scene(), [], ttype="shot")
     assert not checks.has_errors(issues)
+
+
+# ---- profiler (WARN-only) ----------------------------------------------------
+
+def _ptex(name="t", w=1024, h=1024, channels=4, is_float=False):
+    return {"name": name, "width": w, "height": h,
+            "channels": channels, "is_float": is_float}
+
+
+def _stats(**kw):
+    base = {"poly_count": 1000, "object_count": 10,
+            "textures": [_ptex()], "heavy_modifiers": []}
+    base.update(kw)
+    return base
+
+
+def test_profile_thresholds_defaults_and_override():
+    t = checks.profile_thresholds(None)
+    assert t["max_polycount"] == 2_000_000
+    t = checks.profile_thresholds({"profiling": {"max_polycount": 5}})
+    assert t["max_polycount"] == 5
+    assert t["max_objects"] == 1500                    # untouched default
+
+
+def test_check_profile_under_budget_is_clean():
+    assert checks.check_profile(_stats(), checks.DEFAULT_PROFILING) == []
+    assert checks.check_profile(None, checks.DEFAULT_PROFILING) == []
+
+
+def test_check_profile_each_threshold_warns_never_errors():
+    t = dict(checks.DEFAULT_PROFILING, max_polycount=100, max_objects=5,
+             max_textures=0, max_texture_size=512, max_texture_memory_mb=1)
+    issues = checks.check_profile(_stats(
+        poly_count=200, object_count=6,
+        textures=[_ptex(w=1024, h=1024)],
+        heavy_modifiers=[("wall", "SUBSURF")]), t)
+    assert issues and all(lvl == checks.WARNING for lvl, _ in issues)
+    assert not checks.has_errors(issues)                    # profiler NEVER blocks
+    text = " ".join(m for _, m in issues)
+    assert "polys" in text and "objects" in text and "1024x1024" in text
+    assert "SUBSURF" in text
+
+
+def test_texture_memory_math_float_vs_8bit():
+    # 4K RGBA 8-bit = 4096*4096*4*1 = 64 MB; float32 = x4 = 256 MB
+    assert checks.texture_memory_bytes(_ptex(w=4096, h=4096)) == 4096 * 4096 * 4
+    assert checks.texture_memory_bytes(_ptex(w=4096, h=4096, is_float=True)) == \
+        4096 * 4096 * 4 * 4
+    t = dict(checks.DEFAULT_PROFILING, max_texture_memory_mb=100)
+    hot = checks.check_profile(_stats(textures=[_ptex(w=4096, h=4096, is_float=True)]), t)
+    assert any("texture memory" in m for _, m in hot)
+    cold = checks.check_profile(_stats(textures=[_ptex(w=4096, h=4096)]), t)
+    assert not any("texture memory" in m for _, m in cold)
+
+
+def test_texture_size_list_capped_with_summary():
+    t = dict(checks.DEFAULT_PROFILING, max_texture_size=512)
+    many = [_ptex(name=f"tex{i}", w=1024, h=1024) for i in range(8)]
+    issues = checks.check_profile(_stats(textures=many), t)
+    per_tex = [m for _, m in issues if "Texture '" in m]
+    assert len(per_tex) == 5                            # capped
+    assert any("and 3 more" in m for _, m in issues)    # summary line
+
+
+def test_run_checks_appends_profile_and_missing_key_skips():
+    scene = _scene()
+    loc, geo = _rig()
+    objs = [loc, geo]
+    base = checks.run_checks("model", scene, objs, profile_stats=None)
+    with_p = checks.run_checks("model", scene, objs,
+                          profile_stats=_stats(poly_count=10**9),
+                          profiling=checks.DEFAULT_PROFILING)
+    assert len(with_p) == len(base) + 1
+    assert with_p[-1][0] == checks.WARNING
+    # a key omitted from the thresholds skips that check entirely
+    no_poly = dict(checks.DEFAULT_PROFILING)
+    no_poly.pop("max_polycount")
+    assert checks.check_profile(_stats(poly_count=10**9), no_poly) == []

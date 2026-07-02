@@ -8,6 +8,88 @@ level is "error" (blocks publish) or "warning" (allowed, just flagged).
 ERROR = "error"
 WARNING = "warning"
 
+# Pre-publish scene profiler (environments): WARN-only budgets. Overridden by
+# the project_settings "profiling" block; omit a key there to skip that check.
+DEFAULT_PROFILING = {
+    "apply_to_categories": ["environments"],
+    "apply_to_steps": ["model", "dressing"],
+    "max_polycount": 2_000_000,
+    "max_objects": 1500,
+    "max_textures": 200,
+    "max_texture_size": 8192,
+    "max_texture_memory_mb": 8192,
+    "heavy_modifiers": ["SUBSURF", "MULTIRES", "BOOLEAN", "NODES", "OCEAN"],
+}
+
+
+def profile_thresholds(settings: dict | None) -> dict:
+    """Effective profiler config: defaults overlaid by project_settings."""
+    out = dict(DEFAULT_PROFILING)
+    out.update((settings or {}).get("profiling") or {})
+    return out
+
+
+def _mb(n_bytes: float) -> float:
+    return n_bytes / (1024 * 1024)
+
+
+def texture_memory_bytes(tex: dict) -> int:
+    """Estimated GPU memory of one texture: w*h*channels*(4 if float else 1)."""
+    w = int(tex.get("width", 0))
+    h = int(tex.get("height", 0))
+    ch = int(tex.get("channels", 4)) or 4
+    return w * h * ch * (4 if tex.get("is_float") else 1)
+
+
+def check_profile(stats: dict, thresholds: dict) -> list:
+    """Profile a scene against the budgets — every issue a WARNING (the profiler
+    informs, it never blocks). `stats` (collected bpy-side):
+    {poly_count, object_count, textures: [{name, width, height, channels,
+    is_float}], heavy_modifiers: [(obj_name, mod_type)]}."""
+    if not stats:
+        return []
+    t = thresholds or DEFAULT_PROFILING
+    issues = []
+
+    limit = t.get("max_polycount")
+    if limit and stats.get("poly_count", 0) > limit:
+        issues.append((WARNING, f"Heavy geometry: {stats['poly_count']:,} polys "
+                                f"— over the {limit:,} budget. Consider decimating "
+                                f"or instancing."))
+    limit = t.get("max_objects")
+    if limit and stats.get("object_count", 0) > limit:
+        issues.append((WARNING, f"{stats['object_count']:,} objects — over the "
+                                f"{limit:,} budget. Consider joining static meshes."))
+    textures = stats.get("textures") or []
+    limit = t.get("max_textures")
+    if limit and len(textures) > limit:
+        issues.append((WARNING, f"{len(textures)} textures — over the {limit} "
+                                f"budget."))
+    limit = t.get("max_texture_size")
+    if limit:
+        over = [x for x in textures
+                if max(int(x.get("width", 0)), int(x.get("height", 0))) > limit]
+        for x in over[:5]:
+            issues.append((WARNING, f"Texture '{x.get('name', '?')}' is "
+                                    f"{x.get('width')}x{x.get('height')} — over "
+                                    f"{limit}px."))
+        if len(over) > 5:
+            issues.append((WARNING, f"…and {len(over) - 5} more texture(s) over "
+                                    f"{limit}px."))
+    limit = t.get("max_texture_memory_mb")
+    if limit:
+        total_mb = _mb(sum(texture_memory_bytes(x) for x in textures))
+        if total_mb > limit:
+            issues.append((WARNING, f"Estimated texture memory {total_mb:,.0f} MB "
+                                    f"— over the {limit:,} MB budget."))
+    heavy = stats.get("heavy_modifiers") or []
+    if heavy:
+        sample = ", ".join(f"{o} ({m})" for o, m in heavy[:3])
+        issues.append((WARNING, f"{len(heavy)} heavy modifier(s) unapplied — "
+                                f"render cost multiplies downstream: {sample}"
+                                + ("…" if len(heavy) > 3 else "")))
+    return issues
+
 
 def check_units(scene):
     """Scene must be metric / meters so it lands at the right scale in Maya."""
@@ -141,24 +223,30 @@ def check_shot(scene, objects, frame_start_expected=1001):
 
 
 def run_checks(step, scene, objects, locator="PUBLISH", textures=None,
-               ttype=None, frame_start=1001):
+               ttype=None, frame_start=1001, profile_stats=None, profiling=None):
     """Dispatch by task type/step. Asset publishes need a populated publish locator;
-    a shot publish is checked for a camera + the right frame range instead."""
+    a shot publish is checked for a camera + the right frame range instead. With
+    `profile_stats` (heavy steps like environments), the WARN-only profiler report
+    is appended."""
     if ttype == "shot":
         return check_shot(scene, objects, frame_start)
     if step == "dressing":
         # A dressing scene has no PUBLISH locator — everything in it is linked.
         # Its gate (an environment holder must exist) lives in the publish
         # operator, which owns the collection data this module never sees.
-        return check_units(scene)
-    if step == "model":
+        issues = check_units(scene)
+    elif step == "model":
         issues = check_model(scene, objects)
+        issues += check_publish_locator(objects, locator)
     elif step == "surface":
         issues = check_units(scene)
         issues += check_surface(objects, locator, textures)
+        issues += check_publish_locator(objects, locator)
     else:
         issues = check_units(scene)
-    issues += check_publish_locator(objects, locator)
+        issues += check_publish_locator(objects, locator)
+    if profile_stats is not None:
+        issues += check_profile(profile_stats, profiling)
     return issues
 
 

@@ -1,11 +1,13 @@
 {
-  "_comment": "Legami project settings — the single source of truth applied to every Blender scene by the legami_pipeline addon. Edit this file, upload to /shared/Legami/02_pipeline/project_settings.json, and everyone gets the change on next 'Apply Project Settings'. Color names (display_device / view_transform / look) MUST match the displays & views in the active OCIO config; the addon warns instead of crashing if a name is missing.",
+  "_comment": "Legami project settings \u2014 the single source of truth applied to every Blender scene by the legami_pipeline addon. Edit this file, upload to /shared/Legami/02_pipeline/project_settings.json, and everyone gets the change on next 'Apply Project Settings'. Color names (display_device / view_transform / look) MUST match the displays & views in the active OCIO config; the addon warns instead of crashing if a name is missing.",
   "schema_version": 1,
   "project": {
     "name": "Legami",
     "code": "LEGAMI"
   },
-  "addons": ["add_camera_rigs"],
+  "addons": [
+    "add_camera_rigs"
+  ],
   "_addons_note": "Blender add-ons to make available when launched through the app. For each, the addon is enabled if installed, else auto-installed from a project-shipped zip in 02_pipeline/blender_extensions/<name>.zip (which syncs to every machine), then enabled. Matched by module leaf name so bundled and 4.2+ extension forms both work. Default if omitted: add_camera_rigs (the layout Dolly/Crane camera rig).",
   "color_management": {
     "ocio_config_rel": "02_pipeline/ocio/config.ocio",
@@ -54,7 +56,9 @@
     "view_transform": "ACES 1.0 - SDR Video",
     "template": "dev/TurnTableTemplate.blend",
     "template_control": "ASSET_SOCKET",
-    "template_remove": ["Showcase Asset"],
+    "template_remove": [
+      "Showcase Asset"
+    ],
     "template_ground": "Pedestal",
     "template_fit": "Showcase Asset",
     "template_fit_scale": 0.9,
@@ -78,10 +82,47 @@
   "assembly": {
     "camera_step": "layout",
     "representations": {
-      "layout":    {"source_step": "rig", "fallback_step": "model", "load": "link",    "apply_look": false},
-      "animation": {"source_step": "rig", "fallback_step": "model", "load": "link",    "apply_look": false},
-      "lighting":  {"source_step": "cache", "fallback_step": "model", "load": "alembic", "apply_look": true},
+      "layout": {
+        "source_step": "rig",
+        "fallback_step": "model",
+        "load": "link",
+        "apply_look": false
+      },
+      "animation": {
+        "source_step": "rig",
+        "fallback_step": "model",
+        "load": "link",
+        "apply_look": false
+      },
+      "lighting": {
+        "source_step": "cache",
+        "fallback_step": "model",
+        "load": "alembic",
+        "apply_look": true
+      },
       "comp": null
     }
+  },
+  "_profiling_note": "Pre-publish scene profiler (environments): WARN-only, never blocks. Omit a key to skip that check.",
+  "profiling": {
+    "apply_to_categories": [
+      "environments"
+    ],
+    "apply_to_steps": [
+      "model",
+      "dressing"
+    ],
+    "max_polycount": 2000000,
+    "max_objects": 1500,
+    "max_textures": 200,
+    "max_texture_size": 8192,
+    "max_texture_memory_mb": 8192,
+    "heavy_modifiers": [
+      "SUBSURF",
+      "MULTIRES",
+      "BOOLEAN",
+      "NODES",
+      "OCEAN"
+    ]
   }
 }
