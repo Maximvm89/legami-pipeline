@@ -693,6 +693,44 @@ def _units_ok(scene):
             and abs(float(getattr(us, "scale_length", 1.0)) - 1.0) <= 1e-6)
 
 
+class FLUMEN_OT_show_log(bpy.types.Operator):
+    bl_idname = "flumen.show_log"
+    bl_label = "Show pipeline log"
+    bl_description = ("Load the tail of ~/.flumen/blender.log (this Blender's "
+                      "console output) into Blender's Text Editor. Run again to "
+                      "refresh")
+    _TEXT_NAME = "blender.log (tail)"
+    _LINES = 400
+
+    def execute(self, context):
+        path = os.path.join(os.path.expanduser("~"), ".flumen", "blender.log")
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                tail = "".join(fh.readlines()[-self._LINES:])
+        except OSError:
+            self.report({"WARNING"}, f"No log yet at {path} — launch Blender via "
+                                     f"the Workspace app to capture output.")
+            return {"CANCELLED"}
+        txt = bpy.data.texts.get(self._TEXT_NAME)
+        if txt is None:
+            txt = bpy.data.texts.new(self._TEXT_NAME)
+        txt.clear()
+        txt.write(f"# {path} — last {self._LINES} lines "
+                  f"(Flumen menu > Show pipeline log to refresh)\n\n" + tail)
+        txt.cursor_set(max(0, len(txt.lines) - 1))   # jump to the end (newest)
+        # Show it: reuse an open Text Editor if there is one.
+        shown = False
+        for area in context.screen.areas:
+            if area.type == "TEXT_EDITOR":
+                area.spaces.active.text = txt
+                shown = True
+                break
+        self.report({"INFO"}, "Log loaded" + ("" if shown else
+                    f" into the Text Editor datablock '{self._TEXT_NAME}' — "
+                    f"switch any editor to Text Editor to read it"))
+        return {"FINISHED"}
+
+
 class FLUMEN_OT_auto_fix(bpy.types.Operator):
     bl_idname = "flumen.auto_fix"
     bl_label = "Auto-fix issues"
@@ -2713,6 +2751,7 @@ CLASSES = (
     FLUMEN_OT_build_dressing,
     FLUMEN_OT_add_prop,
     FLUMEN_OT_auto_fix,
+    FLUMEN_OT_show_log,
     FLUMEN_OT_publish_upload,
     FLUMEN_OT_load_model,
     FLUMEN_OT_apply_look,

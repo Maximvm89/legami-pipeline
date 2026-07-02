@@ -60,6 +60,7 @@ class FLUMEN_MT_menu(bpy.types.Menu):
         layout.operator("flumen.verify_ocio", icon="COLOR")
         layout.separator()
         layout.operator("flumen.pull_settings", icon="IMPORT")
+        layout.operator("flumen.show_log", icon="TEXT")
 
         ocio = os.environ.get("BLENDER_OCIO")
         layout.separator()
