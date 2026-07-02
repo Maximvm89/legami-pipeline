@@ -2,7 +2,7 @@
   "_comment": [
     "Team notifications. Copy to notifications.json, fill it in, and upload to",
     "<remote_root>/02_pipeline/notifications.json:",
-    "    flumen put pipeline_config/notifications.json 02_pipeline/",
+    "    flumen put --local pipeline_config/notifications.json --remote 02_pipeline/",
     "Every dailies drop (turntable / look review / playblast) then notifies the",
     "team with the full publish info. Validate with: flumen notify-test.",
     "Both blocks are optional. Discord needs no credentials — create a webhook",
@@ -13,12 +13,12 @@
   ],
   "dailies_email": {
     "enabled": false,
-    "recipients": ["supervisor@studio.com", "lead@studio.com"],
+    "recipients": ["marco.parisi89@gmail.com", "michele@fantastificio.com", "milossi.leonardo@gmail.com"],
     "smtp": {
       "host": "smtp.studio.com",
       "port": 587,
       "user": "pipeline@studio.com",
-      "password": "",
+      "password": "vyqc xqkz ittl qsxa",
       "starttls": true,
       "from": "Flumen <pipeline@studio.com>"
     }
