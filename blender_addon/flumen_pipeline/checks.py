@@ -107,18 +107,25 @@ def check_units(scene):
     return issues
 
 
-def check_model(scene, objects):
+def check_model(scene, objects, max_listed=5):
     issues = check_units(scene)
     meshes = [o for o in objects if getattr(o, "type", "") == "MESH"]
     if not meshes:
         issues.append((ERROR, "No mesh objects found to publish."))
+    # Aggregate unapplied-scale offenders: list a few by name, summarize the rest
+    # (an environment can have hundreds — a per-object wall of text helps nobody).
+    unapplied = []
     for o in meshes:
         scale = tuple(round(float(v), 4) for v in getattr(o, "scale", (1.0, 1.0, 1.0)))
         if scale != (1.0, 1.0, 1.0):
-            issues.append((WARNING,
-                           f"'{getattr(o, 'name', '?')}' has unapplied scale "
-                           f"{scale} — apply it (Ctrl+A ▸ Scale) for clean "
-                           f"transforms in Maya."))
+            unapplied.append(getattr(o, "name", "?"))
+    if unapplied:
+        sample = ", ".join(f"'{n}'" for n in unapplied[:max_listed])
+        more = len(unapplied) - max_listed
+        issues.append((WARNING,
+                       f"{len(unapplied)} mesh(es) with unapplied scale — select "
+                       f"them and apply (Ctrl+A ▸ Scale) for clean transforms in "
+                       f"Maya: {sample}" + (f" …and {more} more" if more > 0 else "")))
     return issues
 
 

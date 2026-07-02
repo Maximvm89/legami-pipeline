@@ -237,3 +237,17 @@ def test_run_checks_appends_profile_and_missing_key_skips():
     no_poly = dict(checks.DEFAULT_PROFILING)
     no_poly.pop("max_polycount")
     assert checks.check_profile(_stats(poly_count=10**9), no_poly) == []
+
+
+def test_model_unapplied_scale_aggregated():
+    loc, geo = _rig()
+    bad = [types.SimpleNamespace(type="MESH", name=f"glass_{i}",
+                                 scale=(0.001, 0.001, 0.001), parent=loc,
+                                 material_slots=[])
+           for i in range(8)]
+    issues = checks.check_model(_scene(), [loc, geo] + bad)
+    scale_warns = [m for lvl, m in issues if "unapplied scale" in m]
+    assert len(scale_warns) == 1                     # ONE aggregated line
+    msg = scale_warns[0]
+    assert "8 mesh(es)" in msg and "glass_0" in msg and "…and 3 more" in msg
+    assert not checks.has_errors(issues)             # still just a warning
