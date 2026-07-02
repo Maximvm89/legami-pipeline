@@ -736,15 +736,22 @@ class FLUMEN_OT_auto_fix(bpy.types.Operator):
             did.append(f"applied scale on {applied} mesh(es)")
         skipped = []
         if shared:
-            skipped.append(f"{len(shared)} shared-mesh")
+            names = ", ".join(o.name for o in shared[:3])
+            skipped.append(f"{len(shared)} shared-mesh ({names}"
+                           + ("…" if len(shared) > 3 else "") + ")")
+            print("[Flumen] auto-fix skipped (shared mesh data — applying would "
+                  "deform the other instances): "
+                  + ", ".join(o.name for o in shared))
         if animated:
             skipped.append(f"{len(animated)} keyframed")
+            print("[Flumen] auto-fix skipped (keyframed): "
+                  + ", ".join(o.name for o in animated))
         if failed:
             skipped.append(f"{failed} failed")
-        msg = ("Fixed: " + "; ".join(did) if did else "Nothing to fix")
+        msg = ("Fixed: " + "; ".join(did) if did else "Nothing left to fix")
         if skipped:
-            msg += "  (skipped: " + ", ".join(skipped) + " — see console)"
-        self.report({"INFO"}, msg + ". Re-run checks to confirm.")
+            msg += "  — skipped: " + ", ".join(skipped) + " [full list in blender.log]"
+        self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 
