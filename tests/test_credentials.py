@@ -6,8 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import animpipe.config as config
-from animpipe.config import SFTPCredentials, ProjectConfig
+import flumen.config as config
+from flumen.config import SFTPCredentials, ProjectConfig
 
 
 def _isolate_cred_file(tmp_path, monkeypatch):
@@ -65,9 +65,9 @@ def test_project_config_sftp_defaults_when_absent(tmp_path):
 def test_remote_root_roundtrips(tmp_path, monkeypatch):
     _isolate_cred_file(tmp_path, monkeypatch)
     SFTPCredentials(host="h", port=22, user="u", password="p",
-                    remote_root="/shared/Legami").save_user()
-    monkeypatch.delenv("LEGAMI_REMOTE_ROOT", raising=False)
-    assert SFTPCredentials.from_env(env_file=None).remote_root == "/shared/Legami"
+                    remote_root="/shared/Flumen").save_user()
+    monkeypatch.delenv("FLUMEN_REMOTE_ROOT", raising=False)
+    assert SFTPCredentials.from_env(env_file=None).remote_root == "/shared/Flumen"
 
 
 def test_load_falls_back_to_cached_config(tmp_path, monkeypatch):
@@ -84,15 +84,15 @@ def test_load_falls_back_to_cached_config(tmp_path, monkeypatch):
 
 
 def test_remote_config_dir():
-    from animpipe.project_sync import remote_config_dir
-    assert remote_config_dir("/shared/Legami/") == "/shared/Legami/02_pipeline"
-    assert remote_config_dir("/shared/Legami") == "/shared/Legami/02_pipeline"
+    from flumen.project_sync import remote_config_dir
+    assert remote_config_dir("/shared/Flumen/") == "/shared/Flumen/02_pipeline"
+    assert remote_config_dir("/shared/Flumen") == "/shared/Flumen/02_pipeline"
 
 
 def test_publish_config_strips_machine_fields():
-    from animpipe.cli import sanitize_published_config
+    from flumen.cli import sanitize_published_config
     raw = {"project": {"name": "L", "code": "L", "remote_root": "/r",
-                       "local_root": "/Users/someone/Legami"},
+                       "local_root": "/Users/someone/Flumen"},
            "tools": {"blender_path": "/Applications/Blender.app"},
            "schema": "folder_schema.yaml"}
     out = sanitize_published_config(raw)

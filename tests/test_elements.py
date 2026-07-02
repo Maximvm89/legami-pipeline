@@ -1,4 +1,4 @@
-"""Tests for animpipe.elements — the shot assembly / breakdown model (no network)."""
+"""Tests for flumen.elements — the shot assembly / breakdown model (no network)."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import elements as E, tasks
+from flumen import elements as E, tasks
 from test_tasks import FakeSrv
 
 

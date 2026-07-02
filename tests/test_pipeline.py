@@ -15,9 +15,9 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from animpipe import schema as S
-from animpipe.config import SFTPCredentials
-from animpipe.sftp import SFTPClient
+from flumen import schema as S
+from flumen.config import SFTPCredentials
+from flumen.sftp import SFTPClient
 
 SCHEMA = yaml.safe_load(open(Path(__file__).parent.parent / "folder_schema.yaml"))
 ROOT = "/projects/TST"
@@ -68,7 +68,7 @@ class FakeSFTP:
 
 
 def test_parallel_walk_correctness():
-    from animpipe.sftp import parallel_walk
+    from flumen.sftp import parallel_walk
     # fake remote filesystem: path -> entries
     fs = {
         "/r": [{"name": "a", "is_dir": True, "size": 0, "mtime": 0},

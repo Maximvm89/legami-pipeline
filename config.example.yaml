@@ -11,14 +11,14 @@ project:
   # init-project creates the schema under here.
   remote_root: "/projects/MAF"
   # Where the project is synced on THIS machine (used by `sync` / `launch`).
-  # Optional — defaults to ~/Legami/<CODE> if omitted.
-  # local_root: "~/Legami/MAF"
+  # Optional — defaults to ~/Flumen/<CODE> if omitted.
+  # local_root: "~/Flumen/MAF"
 
 # Path to the folder schema (relative to this config file, or absolute).
 # Upload this config.yaml + the schema to <remote_root>/02_pipeline/ with
-# `animpipe publish-config`; the Workspace app downloads them on sign-in. The
+# `flumen publish-config`; the Workspace app downloads them on sign-in. The
 # artist enters the server host + project root + login themselves (Sign in…),
-# saved to ~/.legami/credentials.env — never here.
+# saved to ~/.flumen/credentials.env — never here.
 schema: "folder_schema.yaml"
 
 # Optional: naming-convention rules (regex) used to sanity-check new task names.
@@ -31,7 +31,7 @@ schema: "folder_schema.yaml"
 # Optional tool paths used by `launch`.
 tools:
   # Explicit Blender executable. Optional — the launcher auto-detects standard
-  # install locations on Windows/macOS/Linux, or honors the LEGAMI_BLENDER env var.
+  # install locations on Windows/macOS/Linux, or honors the FLUMEN_BLENDER env var.
   # blender_path: "/Applications/Blender.app/Contents/MacOS/Blender"
   blender_path: null
 

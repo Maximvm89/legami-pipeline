@@ -4,7 +4,7 @@ Order of truth:
   1. A VERSION file shipped in the bundle (written by build.py from the git tag)
      — this is what a frozen .exe reports, since git isn't available there.
   2. `git describe --tags` in a source checkout (so dev runs show the live tag).
-  3. The hardcoded fallback in animpipe.__init__.
+  3. The hardcoded fallback in flumen.__init__.
 """
 from __future__ import annotations
 

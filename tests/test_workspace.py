@@ -12,7 +12,7 @@ from workspace_app import core
 
 
 class FakeSFTP:
-    """Provides walk_remote() like animpipe.sftp.SFTPClient."""
+    """Provides walk_remote() like flumen.sftp.SFTPClient."""
     def __init__(self, entries):
         self._entries = entries
 
@@ -38,7 +38,7 @@ def test_mirror_structure_creates_dirs_only(tmp_path):
         _file("03_assets/characters/hero/model/work/hero.blend", 100, 1.0),  # ignored
     ]
     sftp = FakeSFTP(entries)
-    created = core.mirror_structure(sftp, "/shared/Legami", str(tmp_path))
+    created = core.mirror_structure(sftp, "/shared/Flumen", str(tmp_path))
     assert (tmp_path / "03_assets/characters/hero/model/work").is_dir()
     # the file entry must NOT create anything
     assert not (tmp_path / "03_assets/characters/hero/model/work/hero.blend").exists()
@@ -252,13 +252,13 @@ def test_set_local_root_preserves_comments(tmp_path):
         "project:\n"
         '  name: "X"\n'
         "  # a comment\n"
-        '  remote_root: "/shared/Legami"\n'
+        '  remote_root: "/shared/Flumen"\n'
         "schema: f.yaml\n"
     )
-    core.set_local_root_in_config(str(cfg), "/Users/me/Legami/LEGAMI")
+    core.set_local_root_in_config(str(cfg), "/Users/me/Flumen/LEGAMI")
     text = cfg.read_text()
     assert "# a comment" in text                       # comments preserved
-    assert 'local_root: "/Users/me/Legami/LEGAMI"' in text
+    assert 'local_root: "/Users/me/Flumen/LEGAMI"' in text
     # idempotent: running again replaces, not duplicates
     core.set_local_root_in_config(str(cfg), "/new/path")
     assert text.count("local_root:") == 1 or cfg.read_text().count("local_root:") == 1

@@ -1,7 +1,7 @@
 # Releasing — Windows installer
 
 How to cut a versioned release and produce the per-user Windows installer
-(`Legami-Setup-<version>.exe`).
+(`Flumen-Setup-<version>.exe`).
 
 ## The easy way: push a tag, CI does the rest (recommended)
 
@@ -10,7 +10,7 @@ publishes the GitHub Release automatically whenever you push a `v*` tag — no
 Windows machine, no manual upload:
 
 ```bash
-git tag -a v0.1.1 -m "Legami v0.1.1"
+git tag -a v0.1.1 -m "Flumen v0.1.1"
 git push origin v0.1.1
 ```
 
@@ -35,7 +35,7 @@ tagging/publishing can be driven from anywhere.
 
 ### 1. Tag the version (from the Mac, on a green `main`)
 ```bash
-git tag -a v0.1.0 -m "Legami v0.1.0"
+git tag -a v0.1.0 -m "Flumen v0.1.0"
 git push origin v0.1.0
 ```
 The version is stamped from `git describe --tags`, so **tag before building**.
@@ -47,29 +47,29 @@ git checkout v0.1.0
 pip install -r requirements.txt -r requirements-gui.txt -r requirements-build.txt   # if deps changed
 python build.py --installer
 ```
-This builds the onedir bundle (`dist\Legami\`), stamps `VERSION`, then compiles
-`packaging\legami.iss` into **`dist\Legami-Setup-0.1.0.exe`**.
+This builds the onedir bundle (`dist\Flumen\`), stamps `VERSION`, then compiles
+`packaging\flumen.iss` into **`dist\Flumen-Setup-0.1.0.exe`**.
 
 (`python build.py` alone just makes the bundle; add `--zip` for a plain zip, or
 `--installer` for the Setup.exe.)
 
 ### 3. Smoke-test the installer
-Run `Legami-Setup-0.1.0.exe` → it installs per-user to
-`%LOCALAPPDATA%\Programs\Legami` (no admin prompt) and adds Start-menu/Desktop
-shortcuts. Launch **Legami Workspace**, sign in, open a task in Blender, build a
-review. Then check Add/Remove Programs shows "Legami Workspace 0.1.0" and that
+Run `Flumen-Setup-0.1.0.exe` → it installs per-user to
+`%LOCALAPPDATA%\Programs\Flumen` (no admin prompt) and adds Start-menu/Desktop
+shortcuts. Launch **Flumen Workspace**, sign in, open a task in Blender, build a
+review. Then check Add/Remove Programs shows "Flumen Workspace 0.1.0" and that
 Uninstall works.
 
 ### 4. Publish to GitHub Releases
 ```powershell
-gh release create v0.1.0 dist\Legami-Setup-0.1.0.exe ^
-  --title "Legami v0.1.0" --notes "First Windows release."
+gh release create v0.1.0 dist\Flumen-Setup-0.1.0.exe ^
+  --title "Flumen v0.1.0" --notes "First Windows release."
 ```
 (or upload the `.exe` via the GitHub Releases web UI.)
 
 ### 5. Point artists at it
 Update the wiki **Installation on Windows** page to link the latest
-`Legami-Setup-*.exe` from the Releases page.
+`Flumen-Setup-*.exe` from the Releases page.
 
 ## Notes
 - **Unsigned installer / SmartScreen.** Without a code-signing certificate Windows

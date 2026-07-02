@@ -6,10 +6,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import users as U
+from flumen import users as U
 from test_tasks import FakeSrv
 
-REMOTE = "/shared/Legami"
+REMOTE = "/shared/Flumen"
 
 
 def test_new_user_defaults_and_role_validation():

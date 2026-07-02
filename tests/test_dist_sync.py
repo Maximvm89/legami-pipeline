@@ -34,7 +34,7 @@ def test_source_zip_excludes_secrets_and_build(tmp_path):
     d.make_source_zip(str(z))
     names = set(zipfile.ZipFile(z).namelist())
     # required source is present
-    for must in ("animpipe/turntable.py", "packaging/legami.spec", "build.py",
+    for must in ("flumen/turntable.py", "packaging/flumen.spec", "build.py",
                  "scripts/dist_sync.py"):
         assert must in names, f"missing {must}"
     # secrets / build output / caches are excluded

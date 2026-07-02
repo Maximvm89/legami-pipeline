@@ -1,4 +1,4 @@
-# Legami Pipeline
+# Flumen Pipeline
 
 An open-source VFX/animation pipeline toolkit built around a shared SFTP server.
 It standardizes the project folder structure, gives every artist an identical
@@ -12,8 +12,8 @@ but the structure is generic enough to adapt to any DCC pipeline.
 
 | Component | What it is | Where |
 |---|---|---|
-| `animpipe` | Python CLI: builds the project folder tree on SFTP, uploads/downloads, and launches Blender with the right OCIO config. | [`animpipe/`](animpipe/) |
-| `legami_pipeline` | Blender add-on: pulls project settings from SFTP and applies color/render/units/output to every scene. | [`blender_addon/`](blender_addon/) |
+| `flumen` | Python CLI: builds the project folder tree on SFTP, uploads/downloads, and launches Blender with the right OCIO config. | [`flumen/`](flumen/) |
+| `flumen_pipeline` | Blender add-on: pulls project settings from SFTP and applies color/render/units/output to every scene. | [`blender_addon/`](blender_addon/) |
 | `workspace_app` | PySide6 desktop GUI: mirrors the structure locally and shows a navigable, color-coded tree of the whole project (server-only / local-only / both) with multi-select filters and one-click upload/download. | [`workspace_app/`](workspace_app/) |
 | Color pipeline | Pinned ACES OCIO config + the Blender/Premiere color policy. | [`color_pipeline/`](color_pipeline/) |
 | Launchers | Cross-platform double-click setup and run scripts (Win/Mac/Linux). | [`launcher/`](launcher/) |
@@ -37,7 +37,7 @@ SFTP server  ──sync──▶  local project copy  ──▶  Blender (addon 
 Requirements: Python 3.10+, and Blender 4.2+/5.x for the add-on.
 
 ```bash
-git clone <your-repo-url> legami && cd legami
+git clone <your-repo-url> flumen && cd flumen
 
 # one-time setup (or double-click launcher/Setup-<os>)
 python3 -m venv .venv
@@ -52,9 +52,9 @@ cp config.example.yaml config.yaml      # set project name, code, remote_root
 Then:
 
 ```bash
-python -m animpipe init-project --dry-run   # preview the folder structure
-python -m animpipe init-project             # create it on the server
-python -m animpipe launch                   # sync config + start Blender
+python -m flumen init-project --dry-run   # preview the folder structure
+python -m flumen init-project             # create it on the server
+python -m flumen launch                   # sync config + start Blender
 python -m workspace_app                      # open the workspace GUI
 ```
 
@@ -84,13 +84,13 @@ Blender installed.
 ## Packaging & distribution
 
 Artists can run a standalone bundle with **no Python install**. One PyInstaller
-spec produces both executables (`animpipe` + `Legami-Workspace`) into a single
-`dist/Legami/` folder. PyInstaller can't cross-compile, so build **on the target
+spec produces both executables (`flumen` + `Flumen-Workspace`) into a single
+`dist/Flumen/` folder. PyInstaller can't cross-compile, so build **on the target
 OS** (Mac build for Mac, Windows build for Windows).
 
 ```bash
 pip install -r requirements.txt -r requirements-gui.txt -r requirements-build.txt
-python build.py --zip          # -> dist/Legami/ (+ dist/Legami-<os>.zip)
+python build.py --zip          # -> dist/Flumen/ (+ dist/Flumen-<os>.zip)
 ```
 
 Dev-on-Mac / test-on-Windows loop, transported over the existing SFTP server

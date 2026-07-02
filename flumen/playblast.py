@@ -127,12 +127,12 @@ def run_playblast(cfg, creds, shot_blend: str, task_id: str,
     if ocio:
         env["BLENDER_OCIO"] = ocio
     env.update({
-        "LEGAMI_PB_FRAMES_DIR": frames_dir,
-        "LEGAMI_PB_RESX": str(pb["resolution_x"]),
-        "LEGAMI_PB_RESY": str(pb["resolution_y"]),
-        "LEGAMI_PB_ENGINE": str(pb["engine"]),
-        "LEGAMI_PB_COLOR": str(pb.get("color", "TEXTURE")),
-        "LEGAMI_PB_VIEW": str(pb.get("view_transform", "")),
+        "FLUMEN_PB_FRAMES_DIR": frames_dir,
+        "FLUMEN_PB_RESX": str(pb["resolution_x"]),
+        "FLUMEN_PB_RESY": str(pb["resolution_y"]),
+        "FLUMEN_PB_ENGINE": str(pb["engine"]),
+        "FLUMEN_PB_COLOR": str(pb.get("color", "TEXTURE")),
+        "FLUMEN_PB_VIEW": str(pb.get("view_transform", "")),
     })
 
     script = _bundled_path("blender_playblast.py")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "blender_addon"))
 
-from legami_pipeline import textures
+from flumen_pipeline import textures
 
 
 def test_sha1_file_matches_known(tmp_path):

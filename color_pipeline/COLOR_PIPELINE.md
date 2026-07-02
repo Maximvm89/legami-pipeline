@@ -1,4 +1,4 @@
-# Legami — Color Pipeline (OCIO / ACES)
+# Flumen — Color Pipeline (OCIO / ACES)
 
 This is the project color policy. Goal: consistent color from Blender through to
 the Premiere edit, using ACES as the common foundation.
@@ -55,17 +55,17 @@ Guarantees everyone uses the exact same color, even across Blender builds.
 
 2. Put it in the project so it ships with the show:
    upload the `.ocio` file (and the `config.ocio` link) to
-   `/shared/Legami/02_pipeline/ocio/`.
+   `/shared/Flumen/02_pipeline/ocio/`.
 
 3. Each artist points Blender at their local synced copy via an environment
    variable **before launching Blender**:
    ```bash
    # macOS / Linux (add to ~/.zshrc or a studio launch script)
-   export BLENDER_OCIO="/path/to/Legami/02_pipeline/ocio/config.ocio"
+   export BLENDER_OCIO="/path/to/Flumen/02_pipeline/ocio/config.ocio"
    ```
    ```bat
    :: Windows (set as a System Environment Variable)
-   setx BLENDER_OCIO "X:\Legami\02_pipeline\ocio\config.ocio"
+   setx BLENDER_OCIO "X:\Flumen\02_pipeline\ocio\config.ocio"
    ```
    `BLENDER_OCIO` overrides the config for Blender only (won't disturb other
    apps). Restart Blender; it now loads the project config.

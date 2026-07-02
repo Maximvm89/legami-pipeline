@@ -374,9 +374,9 @@ def summarize_tree(root: TreeNode) -> dict:
 
 
 # ===========================================================================
-# Upload attribution — ledgers live in animpipe.ledger (shared with the CLI)
+# Upload attribution — ledgers live in flumen.ledger (shared with the CLI)
 # ===========================================================================
-from animpipe.ledger import load_ledgers, record_uploads  # noqa: E402,F401
+from flumen.ledger import load_ledgers, record_uploads  # noqa: E402,F401
 
 
 def uploader_for(node: TreeNode, ledger: dict[str, tuple[str, float]]) -> str:

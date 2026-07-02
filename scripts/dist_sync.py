@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Standalone source/bundle sync over SFTP — the build-box bootstrap.
 
-Depends ONLY on paramiko (no animpipe import), so it can seed a bare Windows
+Depends ONLY on paramiko (no flumen import), so it can seed a bare Windows
 build box before any source exists there. Reads SFTP credentials from .env and
 the project remote_root from config.yaml (same files the rest of the toolkit
 uses). Everything lives under <remote_root>/02_pipeline/_dist/:
 
-    _dist/src/legami-src.zip      the source tree (one atomic archive)
-    _dist/<os>/Legami-<os>.zip    built bundles for artists
+    _dist/src/flumen-src.zip      the source tree (one atomic archive)
+    _dist/<os>/Flumen-<os>.zip    built bundles for artists
 
 Typical loop:
     # on the Mac (dev) — publish the latest source:
@@ -33,11 +33,11 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_SUBDIR = "02_pipeline/_dist"
-SRC_ARCHIVE = "src/legami-src.zip"
+SRC_ARCHIVE = "src/flumen-src.zip"
 
 # Excluded from the source archive (secrets, build output, caches, local data).
 IGNORE_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache",
-               "build", "dist", "LEGAMI", "Legami", "node_modules"}
+               "build", "dist", "LEGAMI", "Flumen", "node_modules"}
 IGNORE_NAMES = {".env", "config.yaml", ".DS_Store", "Thumbs.db"}
 IGNORE_SUFFIXES = (".pyc", ".pyo", ".zip")
 
@@ -152,7 +152,7 @@ def cmd_push(args) -> int:
     base = _dist_base(args)
     remote = posixpath.join(base, SRC_ARCHIVE)
     with tempfile.TemporaryDirectory() as td:
-        local_zip = os.path.join(td, "legami-src.zip")
+        local_zip = os.path.join(td, "flumen-src.zip")
         n = make_source_zip(local_zip)
         size = os.path.getsize(local_zip)
         print(f"packed {n} files ({size/1e6:.1f} MB) -> {remote}")
@@ -172,7 +172,7 @@ def cmd_pull(args) -> int:
     target = os.path.abspath(args.into)
     os.makedirs(target, exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
-        local_zip = os.path.join(td, "legami-src.zip")
+        local_zip = os.path.join(td, "flumen-src.zip")
         transport, sftp = connect(env)
         try:
             print(f"downloading {remote}")
@@ -189,7 +189,7 @@ def cmd_pull(args) -> int:
 def cmd_publish_bundle(args) -> int:
     env = load_env(args.env)
     tag = "windows" if os.name == "nt" else platform.system().lower()
-    local_zip = args.bundle or os.path.join(ROOT, "dist", f"Legami-{tag}.zip")
+    local_zip = args.bundle or os.path.join(ROOT, "dist", f"Flumen-{tag}.zip")
     if not os.path.isfile(local_zip):
         raise SystemExit(f"error: bundle not found: {local_zip} "
                          f"(run `python build.py --zip` first)")
@@ -223,8 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
     pl.set_defaults(func=cmd_pull)
 
     pb = sub.add_parser("publish-bundle",
-                        help="upload the built Legami-<os>.zip for artists")
-    pb.add_argument("--bundle", default="", help="explicit zip path (default: dist/Legami-<os>.zip)")
+                        help="upload the built Flumen-<os>.zip for artists")
+    pb.add_argument("--bundle", default="", help="explicit zip path (default: dist/Flumen-<os>.zip)")
     pb.set_defaults(func=cmd_publish_bundle)
     return p
 

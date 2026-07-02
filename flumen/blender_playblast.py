@@ -1,4 +1,4 @@
-"""Headless playblast render, driven by env vars from animpipe.playblast.
+"""Headless playblast render, driven by env vars from flumen.playblast.
 
 Blender opens the published shot .blend (camera + linked rigs + animation); this
 script renders its frame range through the scene camera into a PNG sequence with a
@@ -16,7 +16,7 @@ _OK_ENGINES = _EEVEE | {"BLENDER_WORKBENCH", "CYCLES"}
 
 
 def _install_render_progress(scene, label="rendering playblast"):
-    """Print a LEGAMI_PROGRESS line per rendered frame so the add-on's publish
+    """Print a FLUMEN_PROGRESS line per rendered frame so the add-on's publish
     progress bar can follow the background playblast. Best-effort."""
     import time
     start, end = scene.frame_start, scene.frame_end
@@ -30,7 +30,7 @@ def _install_render_progress(scene, label="rendering playblast"):
         elapsed = time.monotonic() - t0
         if 0 < done < total and elapsed > 0:
             eta = str(int((total - done) * (elapsed / done)))
-        print(f"LEGAMI_PROGRESS {pct} {eta} {label} frame "
+        print(f"FLUMEN_PROGRESS {pct} {eta} {label} frame "
               f"{scn.frame_current}/{end}", flush=True)
     try:
         bpy.app.handlers.render_post.append(_on_post)
@@ -94,7 +94,7 @@ def _ensure_lighting(scene):
 
 def main():
     scene = bpy.context.scene
-    frames_dir = _env("LEGAMI_PB_FRAMES_DIR")
+    frames_dir = _env("FLUMEN_PB_FRAMES_DIR")
     if not frames_dir:
         print("[playblast] no frames dir; aborting.")
         return
@@ -108,10 +108,10 @@ def main():
         return
 
     r = scene.render
-    requested = _env("LEGAMI_PB_ENGINE", "BLENDER_EEVEE_NEXT")
+    requested = _env("FLUMEN_PB_ENGINE", "BLENDER_EEVEE_NEXT")
     engine = _set_engine(r, requested if requested in _OK_ENGINES else "BLENDER_EEVEE_NEXT")
-    r.resolution_x = int(_env("LEGAMI_PB_RESX", "1280"))
-    r.resolution_y = int(_env("LEGAMI_PB_RESY", "720"))
+    r.resolution_x = int(_env("FLUMEN_PB_RESX", "1280"))
+    r.resolution_y = int(_env("FLUMEN_PB_RESY", "720"))
     r.resolution_percentage = 100
     r.film_transparent = False
     r.image_settings.file_format = "PNG"
@@ -134,7 +134,7 @@ def main():
     # Workbench: fast solid shading. TEXTURE colour shows the texture maps but is
     # flat/shadeless; MATERIAL shows flat base colours. Opt in via playblast.engine.
     elif engine == "BLENDER_WORKBENCH":
-        color = _env("LEGAMI_PB_COLOR", "TEXTURE").upper()
+        color = _env("FLUMEN_PB_COLOR", "TEXTURE").upper()
         if color not in {"MATERIAL", "TEXTURE", "SINGLE", "OBJECT", "VERTEX", "RANDOM"}:
             color = "TEXTURE"
         try:
@@ -145,7 +145,7 @@ def main():
         except Exception:  # noqa: BLE001
             pass
 
-    view = _env("LEGAMI_PB_VIEW", "")
+    view = _env("FLUMEN_PB_VIEW", "")
     if view:
         try:
             scene.view_settings.view_transform = view
@@ -153,10 +153,10 @@ def main():
             pass
 
     # Frame range comes from the file (Build shot set it); allow an env override.
-    if _env("LEGAMI_PB_START"):
-        scene.frame_start = int(_env("LEGAMI_PB_START"))
-    if _env("LEGAMI_PB_END"):
-        scene.frame_end = int(_env("LEGAMI_PB_END"))
+    if _env("FLUMEN_PB_START"):
+        scene.frame_start = int(_env("FLUMEN_PB_START"))
+    if _env("FLUMEN_PB_END"):
+        scene.frame_end = int(_env("FLUMEN_PB_END"))
 
     with open(os.path.join(frames_dir, "_tt_meta.json"), "w", encoding="utf-8") as fh:
         json.dump({"fps": int(scene.render.fps)}, fh)
@@ -167,8 +167,10 @@ def main():
     for c in bpy.data.collections:
         if c.name.startswith("element__"):
             elements.append({"id": c.name[len("element__"):],
-                             "step": c.get("legami_step", ""),
-                             "anim": c.get("legami_anim", "")})
+                             # legacy fallback: shots published before the app
+                             # rename carry legami_* stamps
+                             "step": c.get("flumen_step", "") or c.get("legami_step", ""),
+                             "anim": c.get("flumen_anim", "") or c.get("legami_anim", "")})
     elements.sort(key=lambda e: e["id"])
     with open(os.path.join(frames_dir, "_pb_info.json"), "w", encoding="utf-8") as fh:
         json.dump({"elements": elements}, fh)

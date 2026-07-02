@@ -3,7 +3,7 @@
 import bpy
 
 
-class LegamiPipelinePrefs(bpy.types.AddonPreferences):
+class FlumenPipelinePrefs(bpy.types.AddonPreferences):
     bl_idname = __package__
 
     sftp_host: bpy.props.StringProperty(
@@ -15,7 +15,7 @@ class LegamiPipelinePrefs(bpy.types.AddonPreferences):
         description="Stored in Blender preferences (not encrypted). For shared "
                     "machines, leave blank and enter per session.")
     remote_root: bpy.props.StringProperty(
-        name="Remote Root", default="/shared/Legami")
+        name="Remote Root", default="/shared/Flumen")
     local_root: bpy.props.StringProperty(
         name="Local Project Root", subtype="DIR_PATH", default="",
         description="Where the project is synced on this machine. Usually set "

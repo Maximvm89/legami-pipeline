@@ -1,3 +1,5 @@
-"""animpipe — SFTP folder-structure publisher tools for a 3D animation pipeline."""
+"""Deprecated alias — the toolkit is now `flumen` (the app was renamed from its
+Legami-era branding). `python -m animpipe …` still works during the transition;
+switch scripts to `python -m flumen …`."""
 
-__version__ = "0.2.5"
+from flumen import __version__  # noqa: F401 — keep the old version probe working

@@ -1,4 +1,4 @@
-"""Blender operators for the Legami pipeline addon."""
+"""Blender operators for the Flumen pipeline addon."""
 
 import json
 import os
@@ -30,22 +30,22 @@ def _pref_local_root():
 
 
 def _toolkit_cmd(args):
-    """Build the argv to invoke the animpipe toolkit, or None if unavailable.
+    """Build the argv to invoke the flumen toolkit, or None if unavailable.
 
-    From source the launcher sets MODULE=animpipe and PY=python, so we run
-    `python -m animpipe …`. When frozen, PY is animpipe.exe and MODULE is empty,
+    From source the launcher sets MODULE=flumen and PY=python, so we run
+    `python -m flumen …`. When frozen, PY is flumen.exe and MODULE is empty,
     so we call the executable directly."""
-    py = os.environ.get("LEGAMI_TOOLKIT_PY")
-    td = os.environ.get("LEGAMI_TOOLKIT_DIR")
+    py = os.environ.get("FLUMEN_TOOLKIT_PY")
+    td = os.environ.get("FLUMEN_TOOLKIT_DIR")
     if not py or not td:
         return None, None
-    mod = os.environ.get("LEGAMI_TOOLKIT_MODULE", "animpipe")
+    mod = os.environ.get("FLUMEN_TOOLKIT_MODULE", "flumen")
     prefix = [py] + (["-m", mod] if mod else [])
     return prefix + list(args), td
 
 
 def _shell_toolkit(args, report):
-    """Run an animpipe CLI command via the toolkit the launcher exposed."""
+    """Run an flumen CLI command via the toolkit the launcher exposed."""
     cmd, td = _toolkit_cmd(args)
     if cmd is None:
         report({"ERROR"}, "Toolkit not available — launch from the Workspace app.")
@@ -174,8 +174,8 @@ def apply_settings(scene, data: dict, root: str, report: list):
                                    out["exr_codec"]))
 
 
-class LEGAMI_OT_apply_project_settings(bpy.types.Operator):
-    bl_idname = "legami.apply_project_settings"
+class FLUMEN_OT_apply_project_settings(bpy.types.Operator):
+    bl_idname = "flumen.apply_project_settings"
     bl_label = "Apply Project Settings"
     bl_description = "Apply the project's standard color, render, units and output settings to this scene"
     bl_options = {"REGISTER", "UNDO"}
@@ -187,7 +187,7 @@ class LEGAMI_OT_apply_project_settings(bpy.types.Operator):
     def execute(self, context):
         root = settings_io.find_project_root(_pref_local_root())
         if not root:
-            self.report({"ERROR"}, "No project root. Launch via the Legami launcher, "
+            self.report({"ERROR"}, "No project root. Launch via the Flumen launcher, "
                                    "or set Local Project Root in addon preferences.")
             return {"CANCELLED"}
         try:
@@ -205,16 +205,16 @@ class LEGAMI_OT_apply_project_settings(bpy.types.Operator):
         if warnings:
             self.report({"WARNING"},
                         f"Applied with {len(warnings)} skipped setting(s). See console.")
-            print("[Legami] Project settings applied with warnings:")
+            print("[Flumen] Project settings applied with warnings:")
             print("\n".join(warnings))
-            print(f"[Legami] BLENDER_OCIO = {ocio}")
+            print(f"[Flumen] BLENDER_OCIO = {ocio}")
         else:
             self.report({"INFO"}, "Project settings applied.")
         return {"FINISHED"}
 
 
-class LEGAMI_OT_verify_ocio(bpy.types.Operator):
-    bl_idname = "legami.verify_ocio"
+class FLUMEN_OT_verify_ocio(bpy.types.Operator):
+    bl_idname = "flumen.verify_ocio"
     bl_label = "Verify Color Config"
     bl_description = "Check that Blender loaded the project OCIO config and the project's color names exist"
 
@@ -226,7 +226,7 @@ class LEGAMI_OT_verify_ocio(bpy.types.Operator):
         msgs = []
         if not env_ocio:
             msgs.append("BLENDER_OCIO is NOT set — Blender is using its bundled config. "
-                        "Launch via the Legami launcher.")
+                        "Launch via the Flumen launcher.")
         elif expected and os.path.normpath(env_ocio) != os.path.normpath(expected):
             msgs.append(f"BLENDER_OCIO points to {env_ocio}, expected {expected}.")
         else:
@@ -250,12 +250,12 @@ class LEGAMI_OT_verify_ocio(bpy.types.Operator):
 
         level = "INFO" if all("OK" in m or "present" in m for m in msgs) else "WARNING"
         self.report({level}, " | ".join(msgs))
-        print("[Legami] Verify color config:\n  " + "\n  ".join(msgs))
+        print("[Flumen] Verify color config:\n  " + "\n  ".join(msgs))
         return {"FINISHED"}
 
 
-class LEGAMI_OT_pull_settings(bpy.types.Operator):
-    bl_idname = "legami.pull_settings"
+class FLUMEN_OT_pull_settings(bpy.types.Operator):
+    bl_idname = "flumen.pull_settings"
     bl_label = "Pull Latest From FTP"
     bl_description = "Re-sync the project config (OCIO + project_settings.json) from the FTP"
 
@@ -269,21 +269,21 @@ class LEGAMI_OT_pull_settings(bpy.types.Operator):
 def active_task():
     """The task this Blender session was opened for (set by the Workspace app via
     env vars), or None if Blender was launched without a task context."""
-    tid = os.environ.get("LEGAMI_TASK_ID")
+    tid = os.environ.get("FLUMEN_TASK_ID")
     if not tid:
         return None
     return {
         "id": tid,
-        "type": os.environ.get("LEGAMI_TASK_TYPE", ""),
-        "entity": os.environ.get("LEGAMI_TASK_ENTITY", ""),
-        "step": os.environ.get("LEGAMI_TASK_STEP", ""),
-        "title": os.environ.get("LEGAMI_TASK_TITLE", ""),
-        "work_dir": os.environ.get("LEGAMI_TASK_WORK_DIR", ""),
+        "type": os.environ.get("FLUMEN_TASK_TYPE", ""),
+        "entity": os.environ.get("FLUMEN_TASK_ENTITY", ""),
+        "step": os.environ.get("FLUMEN_TASK_STEP", ""),
+        "title": os.environ.get("FLUMEN_TASK_TITLE", ""),
+        "work_dir": os.environ.get("FLUMEN_TASK_WORK_DIR", ""),
     }
 
 
-class LEGAMI_OT_save_to_task(bpy.types.Operator):
-    bl_idname = "legami.save_to_task"
+class FLUMEN_OT_save_to_task(bpy.types.Operator):
+    bl_idname = "flumen.save_to_task"
     bl_label = "Save into task work folder"
     bl_description = ("Save the current .blend into this task's work/ folder with "
                       "an auto-incremented version")
@@ -502,8 +502,8 @@ def _run_task_checks(step, context, ttype=None):
                              publish_locator_name(), textures=extra, ttype=ttype)
 
 
-class LEGAMI_OT_turntable_framing(bpy.types.Operator):
-    bl_idname = "legami.turntable_framing"
+class FLUMEN_OT_turntable_framing(bpy.types.Operator):
+    bl_idname = "flumen.turntable_framing"
     bl_label = "Turntable Framing"
     bl_description = ("Set this asset's turntable scale/fit. Stored on the PUBLISH "
                       "locator, so it travels with the publish — per character, not global")
@@ -523,13 +523,13 @@ class LEGAMI_OT_turntable_framing(bpy.types.Operator):
     def invoke(self, context, event):
         loc = active_publish_locator()
         if not loc:
-            self.report({"ERROR"}, "Add a Publish Locator first (Legami ▸ Add Publish Locator).")
+            self.report({"ERROR"}, "Add a Publish Locator first (Flumen ▸ Add Publish Locator).")
             return {"CANCELLED"}
-        self.override = bool(loc.get("legami_tt_override", 0))
-        m = loc.get("legami_tt_fit_mode")
+        self.override = bool(loc.get("flumen_tt_override", 0))
+        m = loc.get("flumen_tt_fit_mode")
         if m in ("box", "height", "width"):
             self.fit_mode = m
-        sc = loc.get("legami_tt_fit_scale")
+        sc = loc.get("flumen_tt_fit_scale")
         if sc is not None:
             self.fit_scale = float(sc)
         return context.window_manager.invoke_props_dialog(self, width=340)
@@ -549,17 +549,17 @@ class LEGAMI_OT_turntable_framing(bpy.types.Operator):
         if not loc:
             self.report({"ERROR"}, "No Publish Locator.")
             return {"CANCELLED"}
-        loc["legami_tt_override"] = 1 if self.override else 0
-        loc["legami_tt_fit_mode"] = self.fit_mode
-        loc["legami_tt_fit_scale"] = float(self.fit_scale)
+        loc["flumen_tt_override"] = 1 if self.override else 0
+        loc["flumen_tt_fit_mode"] = self.fit_mode
+        loc["flumen_tt_fit_scale"] = float(self.fit_scale)
         state = (f"{self.fit_mode} @ {self.fit_scale:.2f}x" if self.override
                  else "project default")
         self.report({"INFO"}, f"Turntable framing → {state} (on {loc.name}).")
         return {"FINISHED"}
 
 
-class LEGAMI_OT_add_locator(bpy.types.Operator):
-    bl_idname = "legami.add_publish_locator"
+class FLUMEN_OT_add_locator(bpy.types.Operator):
+    bl_idname = "flumen.add_publish_locator"
     bl_label = "Add Publish Locator"
     bl_description = ("Create the locator empty that marks what gets published — "
                       "parent your asset geometry under it")
@@ -601,7 +601,7 @@ def _export_fbx(filepath: str, use_selection: bool = False) -> bool:
             mesh_smooth_type="FACE", path_mode="AUTO")
         return True
     except Exception as exc:  # noqa: BLE001
-        print("[Legami] FBX export failed:", exc)
+        print("[Flumen] FBX export failed:", exc)
         return False
 
 
@@ -615,8 +615,8 @@ def _draw_checks(layout, issues):
         box.label(text=msg, icon="ERROR" if level == checks.ERROR else "INFO")
 
 
-class LEGAMI_OT_check(bpy.types.Operator):
-    bl_idname = "legami.run_checks"
+class FLUMEN_OT_check(bpy.types.Operator):
+    bl_idname = "flumen.run_checks"
     bl_label = "Run Sanity Checks"
     bl_description = "Run the pre-publish sanity checks for this task and show issues"
 
@@ -726,7 +726,7 @@ def _prepare_shot_publish_anim(context, task):
         steps[el["id"]] = ("camera" if el.get("kind") == "camera"
                            else el.get("source_step", ""))
 
-    rows = context.window_manager.legami_publish_items
+    rows = context.window_manager.flumen_publish_items
     rows.clear()
     for eid in sorted(cur):
         it = rows.add()
@@ -744,7 +744,7 @@ def _prepare_shot_publish_anim(context, task):
                      "steps": steps, "anim_vers": anim_vers}
 
 
-class LEGAMI_PublishItem(bpy.types.PropertyGroup):
+class FLUMEN_PublishItem(bpy.types.PropertyGroup):
     """One row in the shot publish dialog: an animated element + whether to publish
     its animation this version."""
     enabled: bpy.props.BoolProperty(name="Publish", default=True)
@@ -754,8 +754,8 @@ class LEGAMI_PublishItem(bpy.types.PropertyGroup):
     ref: bpy.props.StringProperty()         # the version it's unchanged against
 
 
-class LEGAMI_OT_publish(bpy.types.Operator):
-    bl_idname = "legami.publish"
+class FLUMEN_OT_publish(bpy.types.Operator):
+    bl_idname = "flumen.publish"
     bl_label = "Publish"
     bl_description = ("Run sanity checks, then write a versioned .blend + FBX into "
                       "this task's publish/ folder, upload, and set status to Review")
@@ -779,16 +779,16 @@ class LEGAMI_OT_publish(bpy.types.Operator):
 
     def draw(self, context):
         col = self.layout.column()
-        col.prop(context.window_manager, "legami_publish_desc", text="Description")
+        col.prop(context.window_manager, "flumen_publish_desc", text="Description")
         task = active_task()
         if task and task.get("step") == "model":
-            col.prop(context.window_manager, "legami_render_turntable")
+            col.prop(context.window_manager, "flumen_render_turntable")
         if task and task.get("step") == "surface":
             wm = context.window_manager
-            col.prop(wm, "legami_look_name", text="Look name")
-            col.prop(wm, "legami_render_turntable", text="Render look review")
+            col.prop(wm, "flumen_look_name", text="Look name")
+            col.prop(wm, "flumen_render_turntable", text="Render look review")
         if task and task.get("type") == "shot":
-            rows = context.window_manager.legami_publish_items
+            rows = context.window_manager.flumen_publish_items
             if len(rows):
                 box = col.box()
                 box.label(text="Animation to publish (changed are pre-selected):")
@@ -799,7 +799,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
                     tag = (f"unchanged (= {it.ref})" if it.status == "unchanged"
                            else it.status)
                     row.label(text=tag)
-            col.prop(context.window_manager, "legami_render_turntable",
+            col.prop(context.window_manager, "flumen_render_turntable",
                      text="Render playblast")
         col.separator()
         _draw_checks(col, self._issues)
@@ -819,7 +819,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         if checks.has_errors(issues):
             errs = [m for lvl, m in issues if lvl == checks.ERROR]
             self.report({"ERROR"}, "Publish blocked: " + errs[0])
-            print("[Legami] publish blocked:\n  " + "\n  ".join(errs))
+            print("[Flumen] publish blocked:\n  " + "\n  ".join(errs))
             return {"CANCELLED"}
 
         publish_dir = os.path.join(os.path.dirname(task["work_dir"]), "publish")
@@ -830,7 +830,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
         look_name = ""
         if task["step"] == "surface":
             look_name = look_mod.normalize_look_name(
-                context.window_manager.legami_look_name)
+                context.window_manager.flumen_look_name)
             base = look_mod.look_base(name, look_name)
         else:
             base = f"{name}_{task['step']}"
@@ -874,7 +874,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
             # Publish only the elements the artist checked in the dialog (changed/new
             # are pre-checked). If there are animated elements but none are selected
             # (nothing changed) -> block: no new version, no duplicate data.
-            rows = context.window_manager.legami_publish_items
+            rows = context.window_manager.flumen_publish_items
             chosen = {it.element_id for it in rows if it.enabled}
             if len(rows) and not chosen:
                 last = _SHOT_PUBLISH.get("last_label", "")
@@ -894,11 +894,11 @@ class LEGAMI_OT_publish(bpy.types.Operator):
                     continue
                 eid = coll.name[len(ELEMENT_HOLDER_PREFIX):]
                 if steps.get(eid):
-                    coll["legami_step"] = steps[eid]
+                    coll["flumen_step"] = steps[eid]
                 if eid in chosen:
-                    coll["legami_anim"] = this_ver
+                    coll["flumen_anim"] = this_ver
                 elif anim_vers.get(eid):
-                    coll["legami_anim"] = anim_vers[eid]
+                    coll["flumen_anim"] = anim_vers[eid]
             # Save the assembled scene (linked rigs + camera + animation) as the
             # versioned publish — no collection wrap, no FBX.
             try:
@@ -962,7 +962,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
 
         pub_args = ["publish", "--local", *files, "--task", task["id"],
                     "--status", "review",
-                    "--description", context.window_manager.legami_publish_desc]
+                    "--description", context.window_manager.flumen_publish_desc]
         for t in texture_files:
             pub_args += ["--texture", t]
         pub_cmd, td = _toolkit_cmd(pub_args)
@@ -972,7 +972,7 @@ class LEGAMI_OT_publish(bpy.types.Operator):
                         f"wasn't found to upload — push via the Workspace app.")
             return {"FINISHED"}
 
-        context.window_manager.legami_publish_desc = ""  # reset for next publish
+        context.window_manager.flumen_publish_desc = ""  # reset for next publish
 
         # Hand the (slow) upload to a modal operator so Blender stays responsive
         # and shows a live progress bar instead of freezing. The post-upload
@@ -985,24 +985,24 @@ class LEGAMI_OT_publish(bpy.types.Operator):
             "cmd": pub_cmd, "cwd": td, "n_files": len(files),
             "success": (f"Published {base}_v{version:03d} ({kind}); "
                         f"task → Review.{suffix}"),
-            "render": bool(context.window_manager.legami_render_turntable),
+            "render": bool(context.window_manager.flumen_render_turntable),
             "step": task.get("step"), "ttype": task.get("type"),
             "task_id": task["id"], "pub_path": pub_path, "look_name": look_name,
         })
-        bpy.ops.legami.publish_upload('INVOKE_DEFAULT')
+        bpy.ops.flumen.publish_upload('INVOKE_DEFAULT')
         return {"FINISHED"}
 
 
-# Handoff from LEGAMI_OT_publish to the modal uploader (the codebase's established
+# Handoff from FLUMEN_OT_publish to the modal uploader (the codebase's established
 # pattern for passing rich data into an operator).
 _PENDING_UPLOAD: dict = {}
 
-_PROGRESS_PREFIX = "LEGAMI_PROGRESS"
+_PROGRESS_PREFIX = "FLUMEN_PROGRESS"
 
 
 def _parse_progress(line):
-    """Parse a 'LEGAMI_PROGRESS <pct> <eta> <msg>' line -> (pct, eta|None, msg),
-    or None. Mirrors animpipe.progress (the toolkit runs in a separate Python, so
+    """Parse a 'FLUMEN_PROGRESS <pct> <eta> <msg>' line -> (pct, eta|None, msg),
+    or None. Mirrors flumen.progress (the toolkit runs in a separate Python, so
     the add-on can't import it)."""
     if not line or not line.startswith(_PROGRESS_PREFIX):
         return None
@@ -1026,12 +1026,12 @@ def _human_eta(eta):
     return f"~{int(eta)}s left" if eta < 90 else f"~{int(round(eta / 60))}m left"
 
 
-class LEGAMI_OT_publish_upload(bpy.types.Operator):
+class FLUMEN_OT_publish_upload(bpy.types.Operator):
     """Run the publish upload — then the review render (turntable/look/playblast) —
     as background subprocesses, showing a live progress bar (Blender's progress
     cursor + a status-bar message with %, ETA) for BOTH phases, so the UI never
     freezes and the artist always sees what's happening."""
-    bl_idname = "legami.publish_upload"
+    bl_idname = "flumen.publish_upload"
     bl_label = "Publishing…"
 
     def invoke(self, context, event):
@@ -1060,7 +1060,7 @@ class LEGAMI_OT_publish_upload(bpy.types.Operator):
                 cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1)
         except Exception as exc:  # noqa: BLE001
-            print("[Legami] could not start", phase, ":", exc)
+            print("[Flumen] could not start", phase, ":", exc)
             return False
         self._queue = queue.Queue()
 
@@ -1184,7 +1184,7 @@ def _install_shipped_extension(leaf):
     every artist gets the add‑on without manually downloading it. Returns the
     installed module name, or None if there's no zip / install failed."""
     import glob
-    root = os.environ.get("LEGAMI_PROJECT_ROOT", "")
+    root = os.environ.get("FLUMEN_PROJECT_ROOT", "")
     ext_dir = os.path.join(root, "02_pipeline", "blender_extensions") if root else ""
     if not ext_dir or not os.path.isdir(ext_dir):
         return None
@@ -1196,10 +1196,10 @@ def _install_shipped_extension(leaf):
     try:
         bpy.ops.extensions.package_install_files(
             filepath=zips[0], repo="user_default", enable_on_install=True)
-        print("[Legami] installed add-on from", os.path.basename(zips[0]))
+        print("[Flumen] installed add-on from", os.path.basename(zips[0]))
         return _addon_module_by_leaf(leaf)
     except Exception as exc:  # noqa: BLE001
-        print(f"[Legami] install of '{leaf}' failed: {exc}")
+        print(f"[Flumen] install of '{leaf}' failed: {exc}")
         return None
 
 
@@ -1221,14 +1221,14 @@ def enable_project_addons():
         leaf = name.rsplit(".", 1)[-1]
         module = _addon_module_by_leaf(leaf) or _install_shipped_extension(leaf)
         if not module:
-            print(f"[Legami] add-on '{name}' not available — ship its .zip in "
+            print(f"[Flumen] add-on '{name}' not available — ship its .zip in "
                   f"02_pipeline/blender_extensions/ or install it via Get Extensions.")
             continue
         try:
             addon_utils.enable(module, default_set=False)
-            print("[Legami] add-on ready:", module)
+            print("[Flumen] add-on ready:", module)
         except Exception as exc:  # noqa: BLE001
-            print(f"[Legami] could not enable {module}: {exc}")
+            print(f"[Flumen] could not enable {module}: {exc}")
 
 
 def apply_project_color():
@@ -1253,7 +1253,7 @@ def apply_project_color():
                 scene.view_settings.view_transform = cm["view_transform"]
             except Exception:  # noqa: BLE001
                 pass
-    print("[Legami] applied project color management to",
+    print("[Flumen] applied project color management to",
           len(bpy.data.scenes), "scene(s)")
 
 
@@ -1287,7 +1287,7 @@ def lookdev_hdri_items(self, context):
     global _HDRI_ITEMS
     items = [("", "Project default", "Use the project's configured HDRI"),
              ("none", "None (neutral grey)", "No HDRI — neutral studio lighting")]
-    root = os.environ.get("LEGAMI_PROJECT_ROOT")
+    root = os.environ.get("FLUMEN_PROJECT_ROOT")
     if root:
         d = os.path.join(root, "05_library", "hdri")
         if os.path.isdir(d):
@@ -1338,8 +1338,8 @@ def _purge_orphan_data(data):
             continue
 
 
-class LEGAMI_OT_load_model(bpy.types.Operator):
-    bl_idname = "legami.load_model"
+class FLUMEN_OT_load_model(bpy.types.Operator):
+    bl_idname = "flumen.load_model"
     bl_label = "Load published model"
     bl_description = ("Append the latest published model geometry for this asset "
                       "into the scene, under the publish locator, ready to shade")
@@ -1351,7 +1351,7 @@ class LEGAMI_OT_load_model(bpy.types.Operator):
                                    "from the Workspace app.")
             return {"CANCELLED"}
         # The Workspace app may have pre-downloaded the model publish; else fetch it.
-        model_blend = os.environ.get("LEGAMI_MODEL_PUBLISH")
+        model_blend = os.environ.get("FLUMEN_MODEL_PUBLISH")
         if not model_blend or not os.path.isfile(model_blend):
             model_blend = self._fetch_model(task)
         if not model_blend or not os.path.isfile(model_blend):
@@ -1467,8 +1467,8 @@ def _apply_look_items(self, context):
     return items or [("", "<no looks published>", "")]
 
 
-class LEGAMI_OT_apply_look(bpy.types.Operator):
-    bl_idname = "legami.apply_look"
+class FLUMEN_OT_apply_look(bpy.types.Operator):
+    bl_idname = "flumen.apply_look"
     bl_label = "Apply look"
     bl_description = ("Fetch a published look for this character and assign its "
                       "materials onto the meshes by name")
@@ -1586,8 +1586,8 @@ class LEGAMI_OT_apply_look(bpy.types.Operator):
         return assigned, missing
 
 
-class LEGAMI_OT_preview_turntable(bpy.types.Operator):
-    bl_idname = "legami.preview_turntable"
+class FLUMEN_OT_preview_turntable(bpy.types.Operator):
+    bl_idname = "flumen.preview_turntable"
     bl_label = "Preview Turntable Framing"
     bl_description = ("Open the turntable template in a new Blender window through "
                       "the camera (no render) to check framing — save the file first")
@@ -1980,7 +1980,7 @@ def _step_enum_items(self, context):
     return _STEP_ENUM_CACHE[key]
 
 
-class LEGAMI_AssemblyItem(bpy.types.PropertyGroup):
+class FLUMEN_AssemblyItem(bpy.types.PropertyGroup):
     """One row in the Build-shot dialog: an element, which step to bring in, and
     whether to build it."""
     enabled: bpy.props.BoolProperty(name="Build", default=True)
@@ -1994,15 +1994,15 @@ class LEGAMI_AssemblyItem(bpy.types.PropertyGroup):
     payload: bpy.props.StringProperty()      # json of the resolved element
 
 
-class LEGAMI_OT_build_shot(bpy.types.Operator):
-    bl_idname = "legami.build_shot"
+class FLUMEN_OT_build_shot(bpy.types.Operator):
+    bl_idname = "flumen.build_shot"
     bl_label = "Build shot"
     bl_description = ("Bring this shot's breakdown into the scene: link each chosen "
                       "element's rig as a poseable override and build the shot "
                       "camera. Additive — elements already in the scene are left "
                       "untouched, so your posing/animation is never lost")
 
-    # The per-element rows live on the WindowManager (legami_build_items) — an
+    # The per-element rows live on the WindowManager (flumen_build_items) — an
     # operator-owned CollectionProperty doesn't reliably populate the props dialog.
 
     def invoke(self, context, event):
@@ -2012,7 +2012,7 @@ class LEGAMI_OT_build_shot(bpy.types.Operator):
                                    "from the Workspace app.")
             return {"CANCELLED"}
         if not bpy.data.filepath:
-            self.report({"ERROR"}, "Save into the task first (Legami ▸ Save into "
+            self.report({"ERROR"}, "Save into the task first (Flumen ▸ Save into "
                                    "task) — linked rigs need the shot file on disk "
                                    "to store relative paths.")
             return {"CANCELLED"}
@@ -2035,7 +2035,7 @@ class LEGAMI_OT_build_shot(bpy.types.Operator):
             return {"FINISHED"} if msg else {"CANCELLED"}
 
         existing = {c.name for c in bpy.data.collections}
-        rows = context.window_manager.legami_build_items
+        rows = context.window_manager.flumen_build_items
         rows.clear()
         for el in listed:
             it = rows.add()
@@ -2056,7 +2056,7 @@ class LEGAMI_OT_build_shot(bpy.types.Operator):
         col = self.layout.column()
         col.label(text="Bring these elements into the shot:")
         box = col.box()
-        for it in context.window_manager.legami_build_items:
+        for it in context.window_manager.flumen_build_items:
             row = box.row(align=True)
             cb = row.row()
             cb.enabled = not it.present          # present ones can't be re-built here
@@ -2080,7 +2080,7 @@ class LEGAMI_OT_build_shot(bpy.types.Operator):
         if not task:
             return {"CANCELLED"}
         chosen, picks, present_ct, deselected_ct = [], {}, 0, 0
-        for it in context.window_manager.legami_build_items:
+        for it in context.window_manager.flumen_build_items:
             if it.present:
                 present_ct += 1
             elif it.enabled:
@@ -2123,7 +2123,7 @@ class LEGAMI_OT_build_shot(bpy.types.Operator):
             (built if holder else skipped).append((el, err))
             if holder:
                 # Stamp the holder so the playblast HUD can show what's in the shot.
-                holder["legami_step"] = ("camera" if el.get("kind") == "camera"
+                holder["flumen_step"] = ("camera" if el.get("kind") == "camera"
                                          else el.get("source_step", ""))
             # Re-apply this element's published animation (its own newest version).
             ael = anim_elements.get(el.get("id"))
@@ -2131,9 +2131,9 @@ class LEGAMI_OT_build_shot(bpy.types.Operator):
                 try:
                     animated += _apply_element_animation(
                         holder, ael["blend_local"], ael["objects"])
-                    holder["legami_anim"] = ael.get("version", "")
+                    holder["flumen_anim"] = ael.get("version", "")
                 except Exception as exc:  # noqa: BLE001
-                    print("[Legami] could not apply animation:", exc)
+                    print("[Flumen] could not apply animation:", exc)
 
         # Store linked-library paths relative to the shot .blend (cross-machine).
         try:
@@ -2196,7 +2196,7 @@ def _anim_version_items(self, context):
     return _ANIM_ENUM_CACHE[key]
 
 
-class LEGAMI_AnimItem(bpy.types.PropertyGroup):
+class FLUMEN_AnimItem(bpy.types.PropertyGroup):
     """One row in the Load-animation dialog: an element + which published version to
     load onto it."""
     enabled: bpy.props.BoolProperty(name="Load", default=True)
@@ -2206,8 +2206,8 @@ class LEGAMI_AnimItem(bpy.types.PropertyGroup):
     version: bpy.props.EnumProperty(name="Version", items=_anim_version_items)
 
 
-class LEGAMI_OT_load_animation(bpy.types.Operator):
-    bl_idname = "legami.load_animation"
+class FLUMEN_OT_load_animation(bpy.types.Operator):
+    bl_idname = "flumen.load_animation"
     bl_label = "Load animation"
     bl_description = ("Load published animation onto the shot's elements — pick a "
                       "published version per element (mix versions across elements)")
@@ -2235,7 +2235,7 @@ class LEGAMI_OT_load_animation(bpy.types.Operator):
 
         in_scene = {c.name[len(ELEMENT_HOLDER_PREFIX):] for c in bpy.data.collections
                     if c.name.startswith(ELEMENT_HOLDER_PREFIX)}
-        rows = context.window_manager.legami_anim_items
+        rows = context.window_manager.flumen_anim_items
         rows.clear()
         for eid in sorted(in_scene):
             versions = [a["version"] for a in anims
@@ -2259,7 +2259,7 @@ class LEGAMI_OT_load_animation(bpy.types.Operator):
         col = self.layout.column()
         col.label(text="Choose a published animation per element:")
         box = col.box()
-        for it in context.window_manager.legami_anim_items:
+        for it in context.window_manager.flumen_anim_items:
             row = box.row(align=True)
             row.prop(it, "enabled", text="")
             row.label(text=it.label, icon="ARMATURE_DATA")
@@ -2269,7 +2269,7 @@ class LEGAMI_OT_load_animation(bpy.types.Operator):
 
     def execute(self, context):
         objs, els = 0, 0
-        for it in context.window_manager.legami_anim_items:
+        for it in context.window_manager.flumen_anim_items:
             if not it.enabled:
                 continue
             data = _LOAD_ANIM.get(it.version)
@@ -2279,7 +2279,7 @@ class LEGAMI_OT_load_animation(bpy.types.Operator):
                 try:
                     n = _apply_element_animation(holder, data["blend_local"], amap)
                 except Exception as exc:  # noqa: BLE001
-                    print("[Legami] load animation failed:", exc)
+                    print("[Flumen] load animation failed:", exc)
                     n = 0
                 if n:
                     objs += n
@@ -2300,21 +2300,21 @@ class LEGAMI_OT_load_animation(bpy.types.Operator):
 
 
 CLASSES = (
-    LEGAMI_OT_apply_project_settings,
-    LEGAMI_OT_verify_ocio,
-    LEGAMI_OT_pull_settings,
-    LEGAMI_OT_add_locator,
-    LEGAMI_OT_save_to_task,
-    LEGAMI_OT_check,
-    LEGAMI_PublishItem,             # PropertyGroup — register before the operator
-    LEGAMI_OT_publish,
-    LEGAMI_OT_publish_upload,
-    LEGAMI_OT_load_model,
-    LEGAMI_OT_apply_look,
-    LEGAMI_AssemblyItem,            # PropertyGroup — register before the operator
-    LEGAMI_OT_build_shot,
-    LEGAMI_AnimItem,                # PropertyGroup — register before the operator
-    LEGAMI_OT_load_animation,
-    LEGAMI_OT_turntable_framing,
-    LEGAMI_OT_preview_turntable,
+    FLUMEN_OT_apply_project_settings,
+    FLUMEN_OT_verify_ocio,
+    FLUMEN_OT_pull_settings,
+    FLUMEN_OT_add_locator,
+    FLUMEN_OT_save_to_task,
+    FLUMEN_OT_check,
+    FLUMEN_PublishItem,             # PropertyGroup — register before the operator
+    FLUMEN_OT_publish,
+    FLUMEN_OT_publish_upload,
+    FLUMEN_OT_load_model,
+    FLUMEN_OT_apply_look,
+    FLUMEN_AssemblyItem,            # PropertyGroup — register before the operator
+    FLUMEN_OT_build_shot,
+    FLUMEN_AnimItem,                # PropertyGroup — register before the operator
+    FLUMEN_OT_load_animation,
+    FLUMEN_OT_turntable_framing,
+    FLUMEN_OT_preview_turntable,
 )

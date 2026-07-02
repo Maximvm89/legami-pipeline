@@ -12,10 +12,10 @@ OCIO_REL = os.path.join("02_pipeline", "ocio", "config.ocio")
 
 def find_project_root(pref_local_root: str | None = None) -> str | None:
     """Resolve the local project root. Priority:
-    1. LEGAMI_PROJECT_ROOT env var (set by the launcher)
+    1. FLUMEN_PROJECT_ROOT env var (set by the launcher)
     2. the addon preference, if provided
     """
-    env = os.environ.get("LEGAMI_PROJECT_ROOT")
+    env = os.environ.get("FLUMEN_PROJECT_ROOT")
     if env and os.path.isdir(env):
         return env
     if pref_local_root:

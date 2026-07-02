@@ -1,6 +1,6 @@
 """Tiny progress protocol shared between the publish toolkit and the Blender add-on.
 
-The toolkit (cmd_publish) prints `LEGAMI_PROGRESS <pct> <eta> <message>` lines to
+The toolkit (cmd_publish) prints `FLUMEN_PROGRESS <pct> <eta> <message>` lines to
 stdout as it uploads; the add-on's modal operator reads them and drives a progress
 bar + status text. Kept text-based and dependency-free so it survives the subprocess
 boundary. Pure + unit-testable.
@@ -8,7 +8,7 @@ boundary. Pure + unit-testable.
 
 from __future__ import annotations
 
-PREFIX = "LEGAMI_PROGRESS"
+PREFIX = "FLUMEN_PROGRESS"
 
 
 def percent(done: float, total: float) -> int:
@@ -30,7 +30,7 @@ def eta_seconds(done: float, total: float, elapsed: float) -> float | None:
 
 
 def format_line(done: float, total: float, elapsed: float, message: str = "") -> str:
-    """Build a `LEGAMI_PROGRESS <pct> <eta> <message>` line (eta blank if unknown)."""
+    """Build a `FLUMEN_PROGRESS <pct> <eta> <message>` line (eta blank if unknown)."""
     eta = eta_seconds(done, total, elapsed)
     eta_s = "" if eta is None else f"{eta:.0f}"
     return f"{PREFIX} {percent(done, total)} {eta_s} {message}".rstrip()

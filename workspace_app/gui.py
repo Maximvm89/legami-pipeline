@@ -1,4 +1,4 @@
-"""Legami Workspace — PySide6 desktop GUI.
+"""Flumen Workspace — PySide6 desktop GUI.
 
 Navigable, color-coded tree of the FTP project (server-only / local-only / both),
 with lazy loading for speed: the top level shows instantly and each folder's
@@ -27,16 +27,16 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem,
 )
 
-from animpipe.config import (ProjectConfig, SFTPCredentials, CACHED_CONFIG,
+from flumen.config import (ProjectConfig, SFTPCredentials, CACHED_CONFIG,
                              save_local_root)
-from animpipe.sftp import SFTPClient
-from animpipe import tasks as tasksmod
-from animpipe import schema as schema_mod
-from animpipe import review as reviewmod
-from animpipe import users as usersmod
-from animpipe import clipboard as clipboardmod
-from animpipe import bugreport
-from animpipe.version import get_version
+from flumen.sftp import SFTPClient
+from flumen import tasks as tasksmod
+from flumen import schema as schema_mod
+from flumen import review as reviewmod
+from flumen import users as usersmod
+from flumen import clipboard as clipboardmod
+from flumen import bugreport
+from flumen.version import get_version
 from . import core
 from . import applog
 
@@ -131,8 +131,8 @@ class Job(QThread):
 class MainWindow(QMainWindow):
     def __init__(self, config_path="config.yaml"):
         super().__init__()
-        from animpipe.version import get_version
-        self.setWindowTitle(f"Legami Workspace — {get_version()}")
+        from flumen.version import get_version
+        self.setWindowTitle(f"Flumen Workspace — {get_version()}")
         self.resize(1040, 680)
         self.config_path = config_path
         self.cfg: ProjectConfig | None = None
@@ -728,7 +728,7 @@ class MainWindow(QMainWindow):
             return
 
         ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-        folder = os.path.join(os.path.expanduser("~"), ".legami", "bug_reports", ts)
+        folder = os.path.join(os.path.expanduser("~"), ".flumen", "bug_reports", ts)
         os.makedirs(folder, exist_ok=True)
         attached = []
         if dlg.include_screenshot and shot is not None:
@@ -795,8 +795,11 @@ class MainWindow(QMainWindow):
         form = QFormLayout(dlg)
         ed_host = QLineEdit(saved.host if saved else "")
         ed_port = QLineEdit(str(saved.port) if saved else "22")
-        ed_root = QLineEdit(saved.remote_root if saved and saved.remote_root else "")
-        ed_root.setPlaceholderText("e.g. /shared/Legami")
+        # Prefill the server convention (/shared/<ProjectName>) so the artist only
+        # types the project name; a saved sign-in keeps its full root.
+        ed_root = QLineEdit(saved.remote_root if saved and saved.remote_root
+                            else "/shared/")
+        ed_root.setPlaceholderText("/shared/<project name>")
         ed_user = QLineEdit(saved.user if saved else "")
         ed_pw = QLineEdit()
         ed_pw.setEchoMode(QLineEdit.Password)
@@ -828,7 +831,7 @@ class MainWindow(QMainWindow):
         # Connect + download the show config (this also validates the login).
         self.status.showMessage("Connecting…")
         try:
-            from animpipe.project_sync import fetch_project_config
+            from flumen.project_sync import fetch_project_config
             fetch_project_config(creds, root)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Sign in failed",
@@ -1442,7 +1445,7 @@ class MainWindow(QMainWindow):
         Loads/saves assembly.json on the Job thread so the UI never blocks."""
         if not self.cfg:
             return
-        from animpipe import elements as elementsmod
+        from flumen import elements as elementsmod
         shot_entity = task["entity"]
         remote = self.cfg.remote_root
         asset_entities = sorted({t["entity"] for t in self._tasks
@@ -1496,7 +1499,7 @@ class MainWindow(QMainWindow):
     def _open_task_in_blender(self, task: dict, blend_rel: str | None = None):
         if not self.cfg:
             return
-        from animpipe.launcher import launch
+        from flumen.launcher import launch
         local_root = self.ed_local.text().strip() or self.cfg.resolved_local_root()
         self.cfg.local_root = local_root  # launcher syncs into the GUI's folder
         remote_root = self.cfg.remote_root
@@ -1526,17 +1529,17 @@ class MainWindow(QMainWindow):
             open_file = cands[0] if cands else None  # newest work file, opened locally
 
         extra_env = {
-            "LEGAMI_TASK_ID": task.get("id", ""),
-            "LEGAMI_TASK_TYPE": task.get("type", ""),
-            "LEGAMI_TASK_ENTITY": task.get("entity", ""),
-            "LEGAMI_TASK_STEP": task.get("step", ""),
-            "LEGAMI_TASK_TITLE": task.get("title", ""),
-            "LEGAMI_TASK_WORK_DIR": work_abs,
+            "FLUMEN_TASK_ID": task.get("id", ""),
+            "FLUMEN_TASK_TYPE": task.get("type", ""),
+            "FLUMEN_TASK_ENTITY": task.get("entity", ""),
+            "FLUMEN_TASK_STEP": task.get("step", ""),
+            "FLUMEN_TASK_TITLE": task.get("title", ""),
+            "FLUMEN_TASK_WORK_DIR": work_abs,
         }
         # Opening a surface task with nothing saved yet: start from a clean,
         # shading-ready scene instead of Blender's default cube/camera/light.
         if task.get("step") == "surface" and not open_file:
-            extra_env["LEGAMI_NEW_SURFACE"] = "1"
+            extra_env["FLUMEN_NEW_SURFACE"] = "1"
         cfg = self.cfg
         creds = self._creds()
 
@@ -1550,7 +1553,7 @@ class MainWindow(QMainWindow):
             if task.get("step") in ("surface", "rig") and task.get("type") == "asset":
                 mp = self._fetch_model_publish(task, local_root, remote_root)
                 if mp:
-                    extra_env["LEGAMI_MODEL_PUBLISH"] = mp
+                    extra_env["FLUMEN_MODEL_PUBLISH"] = mp
             return launch(cfg, creds, extra_env=extra_env, open_file=open_file,
                           log_path=applog.prepare_blender_log())
 
@@ -1564,7 +1567,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(
                     self, "Could not launch Blender",
                     "Blender wasn't found. Set tools.blender_path in config.yaml "
-                    "or the LEGAMI_BLENDER environment variable.")
+                    "or the FLUMEN_BLENDER environment variable.")
 
         self._busy_buttons(True)
         self._spawn(work, done, busy_msg="Fetching version + launching Blender…")
@@ -1859,7 +1862,7 @@ class ElementsDialog(QDialog):
 
     def __init__(self, shot_entity, assembly, asset_entities, parent=None):
         super().__init__(parent)
-        from animpipe import elements as E
+        from flumen import elements as E
         self._E = E
         self._asset_entities = list(asset_entities or [])
         self._assembly = E.normalize(dict(assembly), shot_entity)
@@ -2180,7 +2183,7 @@ class ManageUsersDialog(QDialog):
 def _app_icon_path() -> str:
     """The window icon, shipped as data (sys._MEIPASS root when frozen, else the
     packaging/ folder in a source checkout)."""
-    name = "legami.png"
+    name = "flumen.png"
     if getattr(sys, "frozen", False):
         return os.path.join(sys._MEIPASS, name)
     return os.path.join(os.path.dirname(os.path.dirname(__file__)), "packaging", name)

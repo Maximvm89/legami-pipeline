@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import urllib.parse
 
-GITHUB_REPO = "Maximvm89/legami-pipeline"
+GITHUB_REPO = "Maximvm89/flumen"
 # GitHub accepts long URLs but browsers/servers get unhappy past ~8k; stay well under.
 DEFAULT_MAX_URL = 6000
 

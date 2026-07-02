@@ -1,7 +1,7 @@
 """Keep a rolling log of the Workspace app's output.
 
 GUI apps (especially the frozen .exe with no console) otherwise drop everything
-they print. We tee stdout/stderr to ~/.legami/workspace.log so the bug reporter
+they print. We tee stdout/stderr to ~/.flumen/workspace.log so the bug reporter
 has a real log to attach. Best-effort throughout — logging must never crash the app.
 """
 
@@ -11,14 +11,14 @@ import datetime
 import os
 import sys
 
-LOG_PATH = os.path.join(os.path.expanduser("~"), ".legami", "workspace.log")
+LOG_PATH = os.path.join(os.path.expanduser("~"), ".flumen", "workspace.log")
 # Blender (and everything it spawns: the addon, the toolkit it shells out to for
 # turntables/publishes, the nested headless render, ffmpeg) writes its console
 # output here. Kept SEPARATE from workspace.log on purpose: Blender holds its own
 # OS handle, and two independent handles appending to one file race and corrupt
 # lines on Windows. Within the Blender subtree every process shares one inherited
 # handle, so its own writes stay ordered. The bug reporter attaches both files.
-BLENDER_LOG_PATH = os.path.join(os.path.expanduser("~"), ".legami", "blender.log")
+BLENDER_LOG_PATH = os.path.join(os.path.expanduser("~"), ".flumen", "blender.log")
 
 
 class _Tee:

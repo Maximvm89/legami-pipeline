@@ -67,7 +67,7 @@ def check_publish_locator(objects, locator_name):
             break
     if loc is None:
         return [(ERROR, f"No '{locator_name}' locator found. Add one "
-                        f"(Legami menu ▸ Add Publish Locator) and parent your "
+                        f"(Flumen menu ▸ Add Publish Locator) and parent your "
                         f"asset geometry under it.")]
     meshes = [o for o in _descendants(objects, loc)
               if getattr(o, "type", "") == "MESH"]

@@ -13,10 +13,10 @@ import sys
 
 def _bundled_path(name: str) -> str:
     """Path to a file shipped alongside this module. When frozen by PyInstaller
-    the source isn't on disk, so resolve under the bundle's animpipe/ data dir;
+    the source isn't on disk, so resolve under the bundle's flumen/ data dir;
     otherwise resolve next to this file."""
     if getattr(sys, "frozen", False):
-        return os.path.join(sys._MEIPASS, "animpipe", name)
+        return os.path.join(sys._MEIPASS, "flumen", name)
     return os.path.join(os.path.dirname(__file__), name)
 
 
@@ -110,9 +110,9 @@ def _export_uv_only(cfg, model_path: str, uv_out: str) -> int:
     ocio = _resolve_ocio(local_root)
     if ocio:
         env["BLENDER_OCIO"] = ocio
-    env["LEGAMI_TT_UV_ONLY"] = "1"
-    env["LEGAMI_LR_UV_OUT"] = uv_out
-    env["LEGAMI_TT_LOCATOR"] = (_load_project_settings(local_root).get("publish")
+    env["FLUMEN_TT_UV_ONLY"] = "1"
+    env["FLUMEN_LR_UV_OUT"] = uv_out
+    env["FLUMEN_TT_LOCATOR"] = (_load_project_settings(local_root).get("publish")
                                 or {}).get("locator") or "PUBLISH"
     script = _bundled_path("blender_turntable.py")
     try:
@@ -295,22 +295,22 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
     if ocio:
         env["BLENDER_OCIO"] = ocio
     env.update({
-        "LEGAMI_TT_OUTPUT": out_local,
-        "LEGAMI_TT_FRAMES_DIR": frames_dir,
-        "LEGAMI_TT_FRAMES": str(settings["frames"]),
-        "LEGAMI_TT_RESX": str(settings["resolution_x"]),
-        "LEGAMI_TT_RESY": str(settings["resolution_y"]),
-        "LEGAMI_TT_FPS": str(settings["fps"]),
-        "LEGAMI_TT_ENGINE": str(settings["engine"]),
-        "LEGAMI_TT_VIEW": str(settings.get("view_transform", "")),
+        "FLUMEN_TT_OUTPUT": out_local,
+        "FLUMEN_TT_FRAMES_DIR": frames_dir,
+        "FLUMEN_TT_FRAMES": str(settings["frames"]),
+        "FLUMEN_TT_RESX": str(settings["resolution_x"]),
+        "FLUMEN_TT_RESY": str(settings["resolution_y"]),
+        "FLUMEN_TT_FPS": str(settings["fps"]),
+        "FLUMEN_TT_ENGINE": str(settings["engine"]),
+        "FLUMEN_TT_VIEW": str(settings.get("view_transform", "")),
     })
     # Look-review extras: shade the model with the look + dump UVs (the template
     # script applies these after appending the model).
     if look_blend:
-        env["LEGAMI_LR_LOOK"] = look_blend
-        env["LEGAMI_LR_MANIFEST"] = manifest_path or ""
+        env["FLUMEN_LR_LOOK"] = look_blend
+        env["FLUMEN_LR_MANIFEST"] = manifest_path or ""
     if uv_out:
-        env["LEGAMI_LR_UV_OUT"] = uv_out
+        env["FLUMEN_LR_UV_OUT"] = uv_out
 
     # Template mode: open the artist's turntable .blend and append the model into
     # it, parented under a named control. Otherwise open the model and auto-rig.
@@ -327,21 +327,21 @@ def run_turntable(cfg, creds, model_path: str, task_id: str,
             print(f"error: turntable template not found: {template_local}")
             return 1
         blend_to_open = template_local
-        env["LEGAMI_TT_MODEL"] = model_path
-        env["LEGAMI_TT_CONTROL"] = str(settings.get("template_control", ""))
-        env["LEGAMI_TT_REMOVE"] = "||".join(settings.get("template_remove") or [])
-        env["LEGAMI_TT_GROUND"] = str(settings.get("template_ground", ""))
-        env["LEGAMI_TT_FIT"] = str(settings.get("template_fit", ""))
-        env["LEGAMI_TT_FIT_SCALE"] = str(settings.get("template_fit_scale", 1.0))
-        env["LEGAMI_TT_FIT_MODE"] = str(settings.get("template_fit_mode", "box"))
-        env["LEGAMI_TT_STAMP"] = "1" if settings.get("stamp", True) else "0"
-        env["LEGAMI_TT_LOCATOR"] = locator
+        env["FLUMEN_TT_MODEL"] = model_path
+        env["FLUMEN_TT_CONTROL"] = str(settings.get("template_control", ""))
+        env["FLUMEN_TT_REMOVE"] = "||".join(settings.get("template_remove") or [])
+        env["FLUMEN_TT_GROUND"] = str(settings.get("template_ground", ""))
+        env["FLUMEN_TT_FIT"] = str(settings.get("template_fit", ""))
+        env["FLUMEN_TT_FIT_SCALE"] = str(settings.get("template_fit_scale", 1.0))
+        env["FLUMEN_TT_FIT_MODE"] = str(settings.get("template_fit_mode", "box"))
+        env["FLUMEN_TT_STAMP"] = "1" if settings.get("stamp", True) else "0"
+        env["FLUMEN_TT_LOCATOR"] = locator
 
     script = _bundled_path("blender_turntable.py")
     if preview:
         # Interactive: launch Blender with a window (no --background), set up the
         # framing, and leave it open. Blocks until the artist closes Blender.
-        env["LEGAMI_TT_PREVIEW"] = "1"
+        env["FLUMEN_TT_PREVIEW"] = "1"
         print("Opening turntable preview — look through the camera; close Blender "
               "when done. Tweak template_fit_scale / template_fit_mode to adjust.")
         subprocess.run([blender, blend_to_open, "--python", script],

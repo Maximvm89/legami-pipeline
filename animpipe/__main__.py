@@ -1,4 +1,8 @@
-from .cli import main
+"""`python -m animpipe` — deprecated alias for `python -m flumen`."""
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+import sys
+
+from flumen.cli import main
+
+print("note: 'animpipe' is now 'flumen'; this alias will go away.", file=sys.stderr)
+sys.exit(main())

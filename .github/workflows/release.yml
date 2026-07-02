@@ -35,8 +35,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Legami ${{ github.ref_name }}
-          files: dist/Legami-Setup-*.exe
+          name: Flumen ${{ github.ref_name }}
+          files: dist/Flumen-Setup-*.exe
           fail_on_unmatched_files: true
           body: |
             Per-user Windows installer (no admin required).

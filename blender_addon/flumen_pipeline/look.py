@@ -36,7 +36,7 @@ def parse_look_filename(filename: str, asset_name: str):
 
 def surface_task_id(entity: str) -> str:
     """Id of the surface task that owns an asset's looks — mirrors
-    animpipe.tasks.make_id('asset', entity, 'surface'). Lets a downstream task
+    flumen.tasks.make_id('asset', entity, 'surface'). Lets a downstream task
     (rig, etc.) find the looks published for the same character."""
     return re.sub(r"[^a-z0-9._-]+", "_", f"asset-{entity}-surface".lower())
 

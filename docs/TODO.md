@@ -1,4 +1,4 @@
-# Legami Pipeline — TODO
+# Flumen Pipeline — TODO
 
 Running backlog of things to build/fix. Newest context at the top of each section.
 
@@ -22,7 +22,7 @@ Running backlog of things to build/fix. Newest context at the top of each sectio
   map, labeled + a UV-wireframe panel). Both attach to the look's publish record and
   show in the Dailies tab (with a "Texture sheet" button) under the same
   to_review/reviewed/approved flow. HDRIs come from `05_library/hdri` (project
-  default + per-look override at publish). `animpipe look-review` regenerates.
+  default + per-look override at publish). `flumen look-review` regenerates.
   Follow-ups: per-channel AOV breakdown; render under multiple HDRIs; better
   framing of asset-vs-balls.
 
@@ -39,18 +39,18 @@ Running backlog of things to build/fix. Newest context at the top of each sectio
 - [ ] **Turntable "shadow buffer full" error.** EEVEE runs out of shadow buffer
   during the turntable render. Tune the turntable's shadow settings (shadow
   pool/cube size, soft-shadow steps, or per-light shadow buffer) in
-  `animpipe/blender_turntable.py` and/or expose them in the `turntable` block of
+  `flumen/blender_turntable.py` and/or expose them in the `turntable` block of
   `project_settings.json`, so the render doesn't overflow.
 
 ## Release / distribution
 
 - [ ] **First release tag (`v0.1.0`).** Installer is ready: `python build.py
-  --installer` builds the per-user Windows `Legami-Setup-<version>.exe` via Inno
+  --installer` builds the per-user Windows `Flumen-Setup-<version>.exe` via Inno
   Setup. Follow [docs/RELEASING.md](RELEASING.md) — tag on `main`, build on Windows,
   publish via GitHub Releases. Then automate with CI.
 - [ ] **Remove dead code?** `scripts/dist_sync.py` (the old SFTP source-sync) is
   unused now that the workflow is git + tagged releases. Decide: delete or keep.
-- [ ] **Process:** re-run `animpipe publish-config` whenever project settings or
+- [ ] **Process:** re-run `flumen publish-config` whenever project settings or
   the folder schema change, so artists pick it up on next sign-in.
 
 ## Roadmap (from README)

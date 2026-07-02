@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "blender_addon"))
 
-from legami_pipeline import checks
+from flumen_pipeline import checks
 
 
 def _scene(system="METRIC", scale=1.0):

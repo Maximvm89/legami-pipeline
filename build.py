@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Build the standalone Legami bundle (CLI + Workspace app) with PyInstaller.
+"""Build the standalone Flumen bundle (CLI + Workspace app) with PyInstaller.
 
 Runs the shared spec, then stages the files an artist needs next to the two
-executables in dist/Legami/. PyInstaller cannot cross-compile: run this ON the
+executables in dist/Flumen/. PyInstaller cannot cross-compile: run this ON the
 target OS (macOS build for Mac artists, Windows build for Windows artists).
 
-    python build.py            # clean build into dist/Legami
-    python build.py --zip      # also zip dist/Legami -> dist/Legami-<os>.zip
+    python build.py            # clean build into dist/Flumen
+    python build.py --zip      # also zip dist/Flumen -> dist/Flumen-<os>.zip
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DIST = os.path.join(ROOT, "dist", "Legami")
+DIST = os.path.join(ROOT, "dist", "Flumen")
 
 # Files/dirs copied alongside the executables. The bundle is show-agnostic — the
 # artist signs in (host + project root + login) and the app downloads the show
@@ -56,7 +56,7 @@ def _find_iscc() -> str | None:
     import glob
 
     # 1. Explicit override.
-    override = os.environ.get("LEGAMI_ISCC")
+    override = os.environ.get("FLUMEN_ISCC")
     if override and os.path.isfile(override):
         return override
     # 2. On PATH.
@@ -95,7 +95,7 @@ def _find_iscc() -> str | None:
 
 
 def _make_installer(version: str) -> int:
-    """Compile packaging/legami.iss into dist/Legami-Setup-<version>.exe."""
+    """Compile packaging/flumen.iss into dist/Flumen-Setup-<version>.exe."""
     if os.name != "nt":
         print("error: --installer builds a Windows installer and must run on "
               "Windows (Inno Setup is Windows-only).", file=sys.stderr)
@@ -105,18 +105,18 @@ def _make_installer(version: str) -> int:
         print("error: Inno Setup (ISCC.exe) not found.\n"
               "  Install it:  winget install JRSoftware.InnoSetup\n"
               "  (or download from https://jrsoftware.org/isdl.php)\n"
-              "  If it's installed somewhere custom, set LEGAMI_ISCC to the full "
+              "  If it's installed somewhere custom, set FLUMEN_ISCC to the full "
               "path of ISCC.exe and re-run.\n"
-              "  The bundle in dist\\Legami\\ is already built — you can also compile "
+              "  The bundle in dist\\Flumen\\ is already built — you can also compile "
               "the installer directly:\n"
               "    \"C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe\" "
-              "/DAppVersion=0.1.0 packaging\\legami.iss",
+              "/DAppVersion=0.1.0 packaging\\flumen.iss",
               file=sys.stderr)
         return 1
     print(f"Using Inno Setup: {iscc}")
-    iss = os.path.join(ROOT, "packaging", "legami.iss")
+    iss = os.path.join(ROOT, "packaging", "flumen.iss")
     _run([iscc, f"/DAppVersion={version.lstrip('v')}", iss])
-    out = os.path.join(ROOT, "dist", f"Legami-Setup-{version.lstrip('v')}.exe")
+    out = os.path.join(ROOT, "dist", f"Flumen-Setup-{version.lstrip('v')}.exe")
     print(f"\nInstaller ready: {out}" if os.path.isfile(out)
           else "warning: ISCC ran but the installer wasn't found where expected.")
     return 0
@@ -141,7 +141,7 @@ def main() -> int:
         shutil.rmtree(os.path.join(ROOT, d), ignore_errors=True)
 
     _run([sys.executable, "-m", "PyInstaller",
-          os.path.join("packaging", "legami.spec"), "--noconfirm"])
+          os.path.join("packaging", "flumen.spec"), "--noconfirm"])
 
     if not os.path.isdir(DIST):
         print(f"error: expected bundle at {DIST}", file=sys.stderr)
@@ -171,8 +171,8 @@ def main() -> int:
 
     if args.zip:
         tag = "windows" if os.name == "nt" else platform.system().lower()
-        archive = os.path.join(ROOT, "dist", f"Legami-{tag}-{version}")
-        shutil.make_archive(archive, "zip", os.path.join(ROOT, "dist"), "Legami")
+        archive = os.path.join(ROOT, "dist", f"Flumen-{tag}-{version}")
+        shutil.make_archive(archive, "zip", os.path.join(ROOT, "dist"), "Flumen")
         print(f"  zipped: {archive}.zip")
 
     if args.installer:

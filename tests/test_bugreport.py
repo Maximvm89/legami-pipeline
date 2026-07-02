@@ -1,4 +1,4 @@
-"""Tests for animpipe.bugreport (pure) and workspace_app.applog helpers."""
+"""Tests for flumen.bugreport (pure) and workspace_app.applog helpers."""
 
 import sys
 import urllib.parse
@@ -7,13 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import bugreport as B
+from flumen import bugreport as B
 
 
 def test_environment_text_includes_fields():
     txt = B.environment_text(version="0.2.0", platform_str="Darwin 25.5",
-                             project="Legami [LEGAMI]", user="marco",
-                             remote_root="/shared/Legami", local_root="/x")
+                             project="Flumen [LEGAMI]", user="marco",
+                             remote_root="/shared/Flumen", local_root="/x")
     assert "0.2.0" in txt and "marco" in txt and "Darwin 25.5" in txt
     assert "**App version:**" in txt
 

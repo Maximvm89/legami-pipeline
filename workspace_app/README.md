@@ -1,4 +1,4 @@
-# Legami Workspace — desktop app
+# Flumen Workspace — desktop app
 
 A cross-platform (Windows / macOS / Linux) GUI for artists to manage their local
 copy of the project and sync work/publish files with the FTP.
@@ -65,7 +65,7 @@ Tasks are stored on the server as one JSON file per task under
 The app needs PySide6 in addition to the base tools:
 
 ```bash
-cd ~/legami
+cd ~/flumen
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 python3 -m pip install -r requirements.txt
 python3 -m pip install -r requirements-gui.txt
@@ -78,16 +78,16 @@ in the toolkit folder, same as the other tools.
 
 Double-click the wrapper for your OS in `launcher/`:
 
-- `Legami-Workspace-mac.command`
-- `Legami-Workspace-windows.bat`
-- `Legami-Workspace-linux.sh`
+- `Flumen-Workspace-mac.command`
+- `Flumen-Workspace-windows.bat`
+- `Flumen-Workspace-linux.sh`
 
 …or from a terminal: `python3 -m workspace_app`
 
 ## Typical first use
 
 1. Open the app. It reads `config.yaml` and shows the project + remote root.
-2. Pick a **Local folder** (or accept the default `~/Legami/<CODE>`).
+2. Pick a **Local folder** (or accept the default `~/Flumen/<CODE>`).
 3. Click **Create Local Structure** → the empty folder tree appears locally.
 4. Click **Configure Blender → this folder** → the pipeline now saves here.
 5. Work in Blender, saving scenes into the matching `work/` folders.

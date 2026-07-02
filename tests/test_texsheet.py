@@ -1,4 +1,4 @@
-"""Tests for animpipe.texsheet pure helpers (no Pillow needed)."""
+"""Tests for flumen.texsheet pure helpers (no Pillow needed)."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import texsheet as T
+from flumen import texsheet as T
 
 
 def test_parse_texture_name():

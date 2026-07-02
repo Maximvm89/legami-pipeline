@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "blender_addon"))
 
-from legami_pipeline import look
+from flumen_pipeline import look
 
 
 def _mesh(name, *mats):
@@ -39,7 +39,7 @@ def test_normalize_look_name():
 
 
 def test_surface_task_id_matches_make_id():
-    from animpipe import tasks
+    from flumen import tasks
     entity = "characters/frankenstein"
     assert look.surface_task_id(entity) == tasks.make_id("asset", entity, "surface")
 

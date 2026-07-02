@@ -544,7 +544,7 @@ def cmd_review_copy(args) -> int:
     review_local = _review_local_dir(cfg, date_str)
     if not os.path.isdir(review_local):
         print(f"No local review folder for {date_str}:\n  {review_local}\n"
-              f"Run 'animpipe build-review' (or sync it down) first.")
+              f"Run 'flumen build-review' (or sync it down) first.")
         return 1
     clips = sorted(glob.glob(os.path.join(review_local, "*.mp4")))
     if not clips:
@@ -767,8 +767,8 @@ def cmd_assembly_set_range(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     # Common flags live on a parent parser so they work either before OR after
-    # the subcommand (e.g. both `animpipe --dry-run init-project` and
-    # `animpipe init-project --dry-run`).
+    # the subcommand (e.g. both `flumen --dry-run init-project` and
+    # `flumen init-project --dry-run`).
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("-c", "--config", default="config.yaml",
                         help="project config YAML")
@@ -777,12 +777,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="preview without touching the server")
 
     p = argparse.ArgumentParser(
-        prog="animpipe",
+        prog="flumen",
         parents=[common],
         description="SFTP folder-structure publisher for a 3D animation pipeline.",
     )
     from .version import get_version
-    p.add_argument("--version", action="version", version=f"animpipe {get_version()}")
+    p.add_argument("--version", action="version", version=f"flumen {get_version()}")
 
     sub = p.add_subparsers(dest="command", required=True)
 

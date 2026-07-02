@@ -3,7 +3,7 @@
 The standalone bundle ships no show config — the artist signs in with host +
 project root + login, and the app pulls the project's config.yaml + folder schema
 from <remote_root>/02_pipeline/ (the same area the launcher already syncs
-project_settings.json + OCIO from). Cached under ~/.legami/cache so both the GUI
+project_settings.json + OCIO from). Cached under ~/.flumen/cache so both the GUI
 and the toolkit the Blender add-on shells out to read the same project.
 """
 from __future__ import annotations

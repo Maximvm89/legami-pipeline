@@ -4,9 +4,9 @@ Each user writes only their own file (02_pipeline/.uploads/<user>.json), so
 concurrent uploads from different artists never conflict. A ledger maps a
 path (relative to the project's remote_root) to the upload time.
 
-Lives in animpipe (the low-level layer) so both the CLI and the workspace app
+Lives in flumen (the low-level layer) so both the CLI and the workspace app
 share one implementation. Needs an sftp object with listdir / read_text /
-write_text (animpipe.sftp.SFTPClient provides these).
+write_text (flumen.sftp.SFTPClient provides these).
 """
 
 from __future__ import annotations

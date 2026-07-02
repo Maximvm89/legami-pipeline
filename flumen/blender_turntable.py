@@ -1,10 +1,10 @@
 """Headless turntable render. Run by:
     blender --background <model.blend> --python blender_turntable.py
 
-Reads parameters from env (set by `animpipe turntable`):
-    LEGAMI_TT_OUTPUT  final .mp4 path
-    LEGAMI_TT_FRAMES  number of frames for a full 360 (default 120)
-    LEGAMI_TT_RESX/RESY/FPS, LEGAMI_TT_ENGINE (EEVEE|CYCLES), LEGAMI_TT_VIEW
+Reads parameters from env (set by `flumen turntable`):
+    FLUMEN_TT_OUTPUT  final .mp4 path
+    FLUMEN_TT_FRAMES  number of frames for a full 360 (default 120)
+    FLUMEN_TT_RESX/RESY/FPS, FLUMEN_TT_ENGINE (EEVEE|CYCLES), FLUMEN_TT_VIEW
 Builds a turntable rig (orbit camera + neutral studio sun lighting) sized to the
 model's bounding box, renders a 360 spin to an MP4.
 """
@@ -18,11 +18,11 @@ import mathutils
 
 # Preview mode: set up the framing but don't render or quit, so the artist can
 # look through the turntable camera interactively and dial in the scale.
-_PREVIEW = os.environ.get("LEGAMI_TT_PREVIEW", "0") not in ("0", "", "false", "False")
+_PREVIEW = os.environ.get("FLUMEN_TT_PREVIEW", "0") not in ("0", "", "false", "False")
 
 
 def _install_render_progress(scene, label="rendering turntable"):
-    """Print a LEGAMI_PROGRESS line after each rendered frame so the add-on's
+    """Print a FLUMEN_PROGRESS line after each rendered frame so the add-on's
     publish progress bar can follow the background render. Best-effort."""
     import time
     start, end = scene.frame_start, scene.frame_end
@@ -36,7 +36,7 @@ def _install_render_progress(scene, label="rendering turntable"):
         elapsed = time.monotonic() - t0
         if 0 < done < total and elapsed > 0:
             eta = str(int((total - done) * (elapsed / done)))
-        print(f"LEGAMI_PROGRESS {pct} {eta} {label} frame "
+        print(f"FLUMEN_PROGRESS {pct} {eta} {label} frame "
               f"{scn.frame_current}/{end}", flush=True)
     try:
         bpy.app.handlers.render_post.append(_on_post)
@@ -83,11 +83,11 @@ def _force_linear(obj):
             for kp in fc.keyframe_points:
                 kp.interpolation = "LINEAR"
     except Exception as exc:  # noqa: BLE001
-        print("[Legami] (note) could not force linear interpolation:", exc)
+        print("[Flumen] (note) could not force linear interpolation:", exc)
 
 
 def _apply_view(scene):
-    view = os.environ.get("LEGAMI_TT_VIEW")
+    view = os.environ.get("FLUMEN_TT_VIEW")
     if view:
         try:
             scene.view_settings.view_transform = view
@@ -106,8 +106,8 @@ def _png_output(scene):
         pass
     r.image_settings.file_format = "PNG"
     r.image_settings.color_mode = "RGB"
-    frames_dir = (os.environ.get("LEGAMI_TT_FRAMES_DIR")
-                  or os.path.join(os.path.dirname(os.environ.get("LEGAMI_TT_OUTPUT", ".")),
+    frames_dir = (os.environ.get("FLUMEN_TT_FRAMES_DIR")
+                  or os.path.join(os.path.dirname(os.environ.get("FLUMEN_TT_OUTPUT", ".")),
                                   "_tt_frames"))
     os.makedirs(frames_dir, exist_ok=True)
     r.filepath = os.path.join(frames_dir, "frame_")
@@ -164,7 +164,7 @@ def _preview_setup(scene):
                         sp.shading.type = "MATERIAL"
                     except Exception:  # noqa: BLE001
                         pass
-    print("[Legami] PREVIEW — looking through the turntable camera. Adjust "
+    print("[Flumen] PREVIEW — looking through the turntable camera. Adjust "
           "'template_fit_scale' (and 'template_fit_mode') and re-run; close "
           "Blender when done.")
 
@@ -179,11 +179,11 @@ def _delete_hierarchy(obj):
 
 
 def _apply_look(objects):
-    """If LEGAMI_LR_LOOK is set, append the look's materials and assign them onto the
+    """If FLUMEN_LR_LOOK is set, append the look's materials and assign them onto the
     given meshes by name (from the manifest's assignment map). Turns a model turntable
     into a shaded look-review turntable, on the same template rig."""
     import json
-    look = os.environ.get("LEGAMI_LR_LOOK")
+    look = os.environ.get("FLUMEN_LR_LOOK")
     if not look or not os.path.isfile(look):
         return
     names = []
@@ -192,10 +192,10 @@ def _apply_look(objects):
         dst.materials = list(src.materials)
     mats = {nm: m for nm, m in zip(names, dst.materials) if m is not None}
     try:
-        assignments = json.load(open(os.environ.get("LEGAMI_LR_MANIFEST", ""))) \
+        assignments = json.load(open(os.environ.get("FLUMEN_LR_MANIFEST", ""))) \
             .get("assignments", {})
     except Exception as exc:  # noqa: BLE001
-        print("[Legami] look manifest unreadable:", exc)
+        print("[Flumen] look manifest unreadable:", exc)
         assignments = {}
     by_name = {o.name: o for o in objects}
     assigned = 0
@@ -211,14 +211,14 @@ def _apply_look(objects):
             else:
                 me.materials.append(mat)
         assigned += 1
-    print(f"[Legami] applied look: {len(mats)} material(s) -> {assigned} mesh(es)")
+    print(f"[Flumen] applied look: {len(mats)} material(s) -> {assigned} mesh(es)")
 
 
 def _export_uv_segments(objects):
-    """Dump the UV wireframe as deduped edge segments to LEGAMI_LR_UV_OUT (JSON) — the
+    """Dump the UV wireframe as deduped edge segments to FLUMEN_LR_UV_OUT (JSON) — the
     toolkit draws it with PIL. bpy.ops.uv.export_layout needs a GPU and fails in
     --background, so we read loop UVs directly."""
-    out = os.environ.get("LEGAMI_LR_UV_OUT")
+    out = os.environ.get("FLUMEN_LR_UV_OUT")
     if not out:
         return
     import json
@@ -246,30 +246,30 @@ def _export_uv_segments(objects):
     try:
         with open(out, "w") as fh:
             json.dump({"segments": segs, "max_u": max_u, "max_v": max_v}, fh)
-        print(f"[Legami] UV wireframe -> {out} ({len(segs)} edges)")
+        print(f"[Flumen] UV wireframe -> {out} ({len(segs)} edges)")
     except Exception as exc:  # noqa: BLE001
-        print("[Legami] UV export skipped:", exc)
+        print("[Flumen] UV export skipped:", exc)
 
 
 def run_template_mode():
     """Append the model into the artist's turntable template, drop the showcase
     placeholder, seat the model on the asset socket, render with the template."""
     scene = bpy.context.scene
-    model = os.environ.get("LEGAMI_TT_MODEL")
-    control_name = os.environ.get("LEGAMI_TT_CONTROL", "")
-    remove_names = [n for n in os.environ.get("LEGAMI_TT_REMOVE", "").split("||") if n]
+    model = os.environ.get("FLUMEN_TT_MODEL")
+    control_name = os.environ.get("FLUMEN_TT_CONTROL", "")
+    remove_names = [n for n in os.environ.get("FLUMEN_TT_REMOVE", "").split("||") if n]
 
     # Framing: scale the incoming asset to fit a reference object's volume (the
     # showcase placeholder the camera was composed around), times a zoom knob.
     # fit_scale < 1 zooms out (more margin), > 1 zooms in. Measure the reference
     # BEFORE it gets removed below.
-    fit_name = os.environ.get("LEGAMI_TT_FIT", "")
+    fit_name = os.environ.get("FLUMEN_TT_FIT", "")
     try:
-        fit_scale = float(os.environ.get("LEGAMI_TT_FIT_SCALE") or "1") or 1.0
+        fit_scale = float(os.environ.get("FLUMEN_TT_FIT_SCALE") or "1") or 1.0
     except ValueError:
         fit_scale = 1.0
-    fit_mode = (os.environ.get("LEGAMI_TT_FIT_MODE", "box") or "box").lower()
-    do_stamp = os.environ.get("LEGAMI_TT_STAMP", "1") not in ("0", "", "false", "False")
+    fit_mode = (os.environ.get("FLUMEN_TT_FIT_MODE", "box") or "box").lower()
+    do_stamp = os.environ.get("FLUMEN_TT_STAMP", "1") not in ("0", "", "false", "False")
     asset_name = os.path.splitext(os.path.basename(model or "asset"))[0]
     fit_size = None
     if fit_name:
@@ -283,22 +283,22 @@ def run_template_mode():
                     rmn[i] = min(rmn[i], w[i])
                     rmx[i] = max(rmx[i], w[i])
             fit_size = [rmx[i] - rmn[i] for i in range(3)]
-            print(f"[Legami] fit reference '{fit_name}' size="
+            print(f"[Flumen] fit reference '{fit_name}' size="
                   f"{tuple(round(s, 3) for s in fit_size)}")
         else:
-            print(f"[Legami] fit reference '{fit_name}' not found; no scaling")
+            print(f"[Flumen] fit reference '{fit_name}' not found; no scaling")
 
     for nm in remove_names:
         ob = bpy.data.objects.get(nm)
         if ob:
             _delete_hierarchy(ob)
-            print(f"[Legami] removed placeholder '{nm}'")
+            print(f"[Flumen] removed placeholder '{nm}'")
 
-    locator_name = os.environ.get("LEGAMI_TT_LOCATOR", "")
+    locator_name = os.environ.get("FLUMEN_TT_LOCATOR", "")
     with bpy.data.libraries.load(model, link=False) as (src, dst):
         dst.objects = list(src.objects)
-    print(f"[Legami] model file: {model}")
-    print(f"[Legami] objects in model: {[o.name for o in dst.objects if o]}")
+    print(f"[Flumen] model file: {model}")
+    print(f"[Flumen] objects in model: {[o.name for o in dst.objects if o]}")
 
     # If a publish locator is present, bring in ONLY it + its descendants;
     # otherwise fall back to all geometry.
@@ -317,25 +317,25 @@ def run_template_mode():
                 wanted.add(c)
                 stack.append(c)
         candidates = [o for o in wanted]
-        print(f"[Legami] using locator '{locator_name}' -> {len(candidates)} object(s)")
+        print(f"[Flumen] using locator '{locator_name}' -> {len(candidates)} object(s)")
     else:
         candidates = [o for o in dst.objects if o]
         if locator_name:
-            print(f"[Legami] locator '{locator_name}' not found; using all geometry")
+            print(f"[Flumen] locator '{locator_name}' not found; using all geometry")
 
     # Per-asset override (custom props on the PUBLISH locator, set in Blender via
-    # Legami ▸ Turntable). Takes precedence over the project_settings defaults.
-    if chosen is not None and chosen.get("legami_tt_override"):
-        m = chosen.get("legami_tt_fit_mode")
+    # Flumen ▸ Turntable). Takes precedence over the project_settings defaults.
+    if chosen is not None and chosen.get("flumen_tt_override"):
+        m = chosen.get("flumen_tt_fit_mode")
         if m in ("box", "height", "width"):
             fit_mode = m
-        sc = chosen.get("legami_tt_fit_scale")
+        sc = chosen.get("flumen_tt_fit_scale")
         if sc is not None:
             try:
                 fit_scale = float(sc)
             except (TypeError, ValueError):
                 pass
-        print(f"[Legami] per-asset turntable override: "
+        print(f"[Flumen] per-asset turntable override: "
               f"fit_mode={fit_mode} fit_scale={fit_scale}")
 
     roots = []
@@ -360,10 +360,10 @@ def run_template_mode():
         linked.append(obj)
         if obj.parent is None or obj.parent not in candidates:
             roots.append(obj)
-    print(f"[Legami] linked {len(linked)} object(s): "
+    print(f"[Flumen] linked {len(linked)} object(s): "
           f"{[(o.name, o.type) for o in linked]}")
     if hidden_n:
-        print(f"[Legami] kept {hidden_n} object(s) hidden per artist visibility "
+        print(f"[Flumen] kept {hidden_n} object(s) hidden per artist visibility "
               f"(camera/monitor icon)")
 
     # A look review reuses this whole template pipeline — just shade the model with
@@ -413,20 +413,20 @@ def run_template_mode():
                 for obj in roots:
                     obj.scale = obj.scale * s
                 bpy.context.view_layer.update()
-                print(f"[Legami] scaled asset x{s:.4f} to fit '{fit_name}' "
+                print(f"[Flumen] scaled asset x{s:.4f} to fit '{fit_name}' "
                       f"(zoom={fit_scale})")
-                print(f"[Legami] asset real size = "
+                print(f"[Flumen] asset real size = "
                       f"{tuple(round(v, 3) for v in msize)} (scene units); the "
                       f"turntable is normalized, NOT real-scale")
                 if s < 0.5 or s > 2.0:
-                    print(f"[Legami] WARNING: large fit scale {s:.3f}x — check the "
+                    print(f"[Flumen] WARNING: large fit scale {s:.3f}x — check the "
                           f"asset's real-world units; it may be modeled too big/small.")
                 if do_stamp:
                     _set_scale_stamp(scene, asset_name, msize, s)
         # Rest height: top surface of the ground object (e.g. the pedestal) if
         # given, otherwise the socket's own Z.
         rest_z = target.z
-        ground_name = os.environ.get("LEGAMI_TT_GROUND", "")
+        ground_name = os.environ.get("FLUMEN_TT_GROUND", "")
         ground = bpy.data.objects.get(ground_name) if ground_name else None
         if ground:
             _gmn, gmx = _world_bbox([ground])
@@ -447,10 +447,10 @@ def run_template_mode():
             bpy.context.view_layer.update()
         for obj in roots:
             wloc = tuple(round(v, 3) for v in obj.matrix_world.translation)
-            print(f"[Legami] seated '{obj.name}' at {wloc} (socket "
+            print(f"[Flumen] seated '{obj.name}' at {wloc} (socket "
                   f"{tuple(round(v, 3) for v in target)})")
     elif control_name:
-        print(f"[Legami] WARNING: socket '{control_name}' not found in template; "
+        print(f"[Flumen] WARNING: socket '{control_name}' not found in template; "
               f"model left at origin")
 
     # Respect the template's color/engine/resolution/animation; only set output.
@@ -462,7 +462,7 @@ def run_template_mode():
     _install_render_progress(scene)
     bpy.ops.render.render(animation=True)
     _write_meta(frames_dir, scene)
-    print("[Legami] template turntable frames rendered to", frames_dir)
+    print("[Flumen] template turntable frames rendered to", frames_dir)
 
 
 def _boost_shadows(scene):
@@ -477,9 +477,9 @@ def _boost_shadows(scene):
                  ee.bl_rna.properties["shadow_pool_size"].enum_items]
         if items:
             ee.shadow_pool_size = items[-1]   # largest pool
-            print(f"[Legami] shadow pool -> {items[-1]}")
+            print(f"[Flumen] shadow pool -> {items[-1]}")
     except Exception as exc:  # noqa: BLE001
-        print("[Legami] could not raise shadow pool:", exc)
+        print("[Flumen] could not raise shadow pool:", exc)
 
 
 def _set_engine(scene, want):
@@ -516,7 +516,7 @@ def build_and_render():
     track.up_axis = "UP_Y"
     scene.camera = cam
 
-    frames = int(os.environ.get("LEGAMI_TT_FRAMES", "120"))
+    frames = int(os.environ.get("FLUMEN_TT_FRAMES", "120"))
     scene.frame_start = 1
     scene.frame_end = frames
     # Make new keyframes LINEAR up front so the spin is constant speed (works
@@ -554,11 +554,11 @@ def build_and_render():
     add_sun("TT_Rim", (math.radians(120), 0, math.radians(180)), 2.0)
 
     r = scene.render
-    _set_engine(scene, os.environ.get("LEGAMI_TT_ENGINE", "EEVEE"))
-    r.resolution_x = int(os.environ.get("LEGAMI_TT_RESX", "1280"))
-    r.resolution_y = int(os.environ.get("LEGAMI_TT_RESY", "720"))
+    _set_engine(scene, os.environ.get("FLUMEN_TT_ENGINE", "EEVEE"))
+    r.resolution_x = int(os.environ.get("FLUMEN_TT_RESX", "1280"))
+    r.resolution_y = int(os.environ.get("FLUMEN_TT_RESY", "720"))
     r.resolution_percentage = 100
-    r.fps = int(os.environ.get("LEGAMI_TT_FPS", "24"))
+    r.fps = int(os.environ.get("FLUMEN_TT_FPS", "24"))
     # Render a PNG sequence; the toolkit encodes the MP4 afterwards (this build
     # of Blender may lack FFmpeg, so we never rely on Blender for video).
     _apply_view(scene)
@@ -570,24 +570,24 @@ def build_and_render():
     _install_render_progress(scene)
     bpy.ops.render.render(animation=True)
     _write_meta(frames_dir, scene)
-    print("[Legami] turntable frames rendered to", frames_dir)
+    print("[Flumen] turntable frames rendered to", frames_dir)
 
 
 def uv_only():
     """Fast path for a sheet‑only review: just dump the UV wireframe of the open
     model's published geometry (no render). The model is opened directly, so keep
     only the PUBLISH locator's meshes if present."""
-    loc = bpy.data.objects.get(os.environ.get("LEGAMI_TT_LOCATOR", "PUBLISH"))
+    loc = bpy.data.objects.get(os.environ.get("FLUMEN_TT_LOCATOR", "PUBLISH"))
     meshes = ([o for o in loc.children_recursive if o.type == "MESH"] if loc
               else [o for o in bpy.context.scene.objects if o.type == "MESH"])
     _export_uv_segments(meshes)
-    print("[Legami] UV‑only export complete")
+    print("[Flumen] UV‑only export complete")
 
 
 try:
-    if os.environ.get("LEGAMI_TT_UV_ONLY"):
+    if os.environ.get("FLUMEN_TT_UV_ONLY"):
         uv_only()
-    elif os.environ.get("LEGAMI_TT_MODEL"):
+    elif os.environ.get("FLUMEN_TT_MODEL"):
         run_template_mode()
     else:
         build_and_render()

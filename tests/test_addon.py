@@ -27,7 +27,7 @@ def _install_fake_bpy():
         FloatProperty=_prop, EnumProperty=_prop, CollectionProperty=_prop,
         PointerProperty=_prop)
     bpy.utils = types.SimpleNamespace(
-        user_resource=lambda *a, **k: "/tmp/legami_modules")
+        user_resource=lambda *a, **k: "/tmp/flumen_modules")
     bpy.context = types.SimpleNamespace()
     bpy.data = types.SimpleNamespace(scenes=[])
     sys.modules["bpy"] = bpy
@@ -35,7 +35,7 @@ def _install_fake_bpy():
 
 _install_fake_bpy()
 
-from legami_pipeline import settings_io, operators  # noqa: E402
+from flumen_pipeline import settings_io, operators  # noqa: E402
 
 
 def _ns(**kw):
@@ -101,8 +101,8 @@ def test_apply_skips_cycles_when_engine_not_cycles():
 
 
 def test_parse_progress_matches_toolkit_format():
-    # The add-on parser must agree with animpipe.progress (separate Pythons).
-    from animpipe import progress as P
+    # The add-on parser must agree with flumen.progress (separate Pythons).
+    from flumen import progress as P
     line = P.format_line(50, 100, 5, "uploading panda_model_v001.blend")
     assert operators._parse_progress(line) == (50, 5.0, "uploading panda_model_v001.blend")
     assert operators._parse_progress("not a progress line") is None

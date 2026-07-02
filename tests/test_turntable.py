@@ -1,4 +1,4 @@
-"""Tests for animpipe.turntable pure helpers + task recording."""
+"""Tests for flumen.turntable pure helpers + task recording."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import turntable, tasks
+from flumen import turntable, tasks
 from test_tasks import FakeSrv  # reuse the in-memory fake
 
 
@@ -23,13 +23,13 @@ def test_bundled_path_source_vs_frozen(monkeypatch):
     monkeypatch.delattr(turntable.sys, "frozen", raising=False)
     p = turntable._bundled_path("blender_turntable.py")
     assert p.endswith("blender_turntable.py")
-    assert "animpipe" in p and p == \
+    assert "flumen" in p and p == \
         str(Path(turntable.__file__).parent / "blender_turntable.py")
-    # Frozen: under the PyInstaller bundle's animpipe/ data dir.
+    # Frozen: under the PyInstaller bundle's flumen/ data dir.
     monkeypatch.setattr(turntable.sys, "frozen", True, raising=False)
     monkeypatch.setattr(turntable.sys, "_MEIPASS", "/bundle", raising=False)
     assert turntable._bundled_path("blender_turntable.py") == \
-        "/bundle/animpipe/blender_turntable.py".replace("/", __import__("os").sep)
+        "/bundle/flumen/blender_turntable.py".replace("/", __import__("os").sep)
 
 
 def test_dailies_rel():
@@ -50,7 +50,7 @@ def test_record_turntable_attaches_to_last_publish():
     turntable.record_turntable(s, "/r", t["id"], rel, "marco")
     reloaded = tasks.get_task(s, "/r", t["id"])
     assert reloaded["publishes"][-1]["turntable"] == rel
-    from animpipe import ledger
+    from flumen import ledger
     assert ledger.load_ledgers(s, "/r")[rel][0] == "marco"
 
 

@@ -1,4 +1,4 @@
-"""Tests for animpipe.tasks (no real FTP)."""
+"""Tests for flumen.tasks (no real FTP)."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import tasks
+from flumen import tasks
 from workspace_app import core
 
 
@@ -119,7 +119,7 @@ def test_publish_task():
     assert h["by"] == "marco"
     assert h["files"] == rels
     # attribution recorded for both
-    from animpipe import ledger
+    from flumen import ledger
     led = ledger.load_ledgers(s, "/r")
     assert led[rels[0]][0] == "marco" and led[rels[1]][0] == "marco"
 

@@ -5,8 +5,8 @@ A task is a unit of work = an entity (shot or asset) + a step (department), e.g.
 file under 02_pipeline/tasks/<id>.json, so different artists editing different
 tasks never conflict.
 
-Lives in animpipe (low level, shared) and only needs an sftp object exposing
-listdir / read_text / write_text (animpipe.sftp.SFTPClient provides these).
+Lives in flumen (low level, shared) and only needs an sftp object exposing
+listdir / read_text / write_text (flumen.sftp.SFTPClient provides these).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Tests for animpipe.lookdev — HDRI listing + resolution (pure, no bpy)."""
+"""Tests for flumen.lookdev — HDRI listing + resolution (pure, no bpy)."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import lookdev
+from flumen import lookdev
 
 
 def _make_hdris(tmp_path, *names):

@@ -7,7 +7,7 @@ Flow:
      this is what guarantees correct color every session).
   3. Find the Blender executable and launch it.
 
-Blender deps (paramiko etc.) come from animpipe's own environment, so artists
+Blender deps (paramiko etc.) come from flumen's own environment, so artists
 never have to install anything into Blender's Python just to launch.
 """
 
@@ -25,21 +25,23 @@ from .sftp import SFTPClient
 
 def _bootstrap_path() -> str:
     """Path to blender_bootstrap.py (the script Blender runs to auto-load the
-    add-on). Shipped as data under animpipe/, so when frozen by PyInstaller it
-    lives at sys._MEIPASS/animpipe/; from source it's next to this module."""
+    add-on). Shipped as data under flumen/, so when frozen by PyInstaller it
+    lives at sys._MEIPASS/flumen/; from source it's next to this module."""
     name = "blender_bootstrap.py"
     if getattr(sys, "frozen", False):
-        return os.path.join(sys._MEIPASS, "animpipe", name)
+        return os.path.join(sys._MEIPASS, "flumen", name)
     return os.path.join(os.path.dirname(__file__), name)
 
 
 def find_blender(explicit: str | None = None) -> str | None:
-    """Locate the Blender executable. Priority: explicit path > LEGAMI_BLENDER
+    """Locate the Blender executable. Priority: explicit path > FLUMEN_BLENDER
     env > OS-standard locations."""
     candidates: list[str] = []
     if explicit:
         candidates.append(os.path.expanduser(explicit))
-    if os.environ.get("LEGAMI_BLENDER"):
+    if os.environ.get("FLUMEN_BLENDER"):
+        candidates.append(os.environ["FLUMEN_BLENDER"])
+    if os.environ.get("LEGAMI_BLENDER"):        # pre-rename name, users set this
         candidates.append(os.environ["LEGAMI_BLENDER"])
 
     system = platform.system()
@@ -113,32 +115,32 @@ def launch(cfg: ProjectConfig, creds: SFTPCredentials, extra_args: list[str] | N
               "will use its bundled config. Run a sync first.", file=sys.stderr)
 
     # Pass the project root to the addon so it can find project_settings.json.
-    env["LEGAMI_PROJECT_ROOT"] = local_root
+    env["FLUMEN_PROJECT_ROOT"] = local_root
     # Let the addon shell back to this toolkit (for publish uploads + turntables).
-    # From source we invoke `python -m animpipe …`; once frozen there is no
-    # interpreter, so point at the sibling animpipe executable and call it
-    # directly (the addon drops the `-m animpipe` prefix when MODULE is empty).
+    # From source we invoke `python -m flumen …`; once frozen there is no
+    # interpreter, so point at the sibling flumen executable and call it
+    # directly (the addon drops the `-m flumen` prefix when MODULE is empty).
     # Base the toolkit + addon lookup on the app folder when frozen (cwd is
     # unreliable for a double-clicked app); on the working dir from source.
     if getattr(sys, "frozen", False):
         app_dir = os.path.dirname(sys.executable)
-        exe_name = "animpipe.exe" if os.name == "nt" else "animpipe"
-        env["LEGAMI_TOOLKIT_PY"] = os.path.join(app_dir, exe_name)
-        env["LEGAMI_TOOLKIT_MODULE"] = ""
+        exe_name = "flumen.exe" if os.name == "nt" else "flumen"
+        env["FLUMEN_TOOLKIT_PY"] = os.path.join(app_dir, exe_name)
+        env["FLUMEN_TOOLKIT_MODULE"] = ""
     else:
         app_dir = os.getcwd()
-        env["LEGAMI_TOOLKIT_PY"] = sys.executable
-        env["LEGAMI_TOOLKIT_MODULE"] = "animpipe"
-    env["LEGAMI_TOOLKIT_DIR"] = app_dir
-    # Folder containing the legami_pipeline package, for auto-load on launch.
+        env["FLUMEN_TOOLKIT_PY"] = sys.executable
+        env["FLUMEN_TOOLKIT_MODULE"] = "flumen"
+    env["FLUMEN_TOOLKIT_DIR"] = app_dir
+    # Folder containing the flumen_pipeline package, for auto-load on launch.
     addon_dir = os.path.join(app_dir, "blender_addon")
     if os.path.isdir(addon_dir):
-        env["LEGAMI_ADDON_DIR"] = addon_dir
+        env["FLUMEN_ADDON_DIR"] = addon_dir
 
     blender = find_blender(cfg.blender_path)
     if not blender:
         msg = ("could not find Blender. Set tools.blender_path in config.yaml "
-               "or the LEGAMI_BLENDER environment variable.")
+               "or the FLUMEN_BLENDER environment variable.")
         if dry_run:
             print(f"(dry-run) warning: {msg}")
             return 0
@@ -159,10 +161,10 @@ def launch(cfg: ProjectConfig, creds: SFTPCredentials, extra_args: list[str] | N
         print(f"warning: file to open not found: {open_file}", file=sys.stderr)
     # Auto-load the add-on for this session (no manual install needed).
     bootstrap = _bootstrap_path()
-    if "LEGAMI_ADDON_DIR" in env and os.path.isfile(bootstrap):
+    if "FLUMEN_ADDON_DIR" in env and os.path.isfile(bootstrap):
         cmd += ["--python", bootstrap]
-    elif "LEGAMI_ADDON_DIR" in env:
-        print(f"warning: add-on bootstrap not found ({bootstrap}); the Legami menu "
+    elif "FLUMEN_ADDON_DIR" in env:
+        print(f"warning: add-on bootstrap not found ({bootstrap}); the Flumen menu "
               f"won't auto-load.", file=sys.stderr)
     cmd += (extra_args or [])
 

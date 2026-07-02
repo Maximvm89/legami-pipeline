@@ -1,4 +1,4 @@
-"""Tests for animpipe.review — the per-item review-status model (no network)."""
+"""Tests for flumen.review — the per-item review-status model (no network)."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import review as R, tasks
+from flumen import review as R, tasks
 from test_tasks import FakeSrv
 
 
@@ -97,7 +97,7 @@ def test_set_review_status_roundtrip_on_server():
     rel = _tt("characters/panda", "panda_model_v001")
     tasks.publish_task(s, "/r", "marco", ["/tmp/panda_model_v001.blend"], t["id"])
     # attach a turntable to the publish (as the render would)
-    from animpipe import turntable
+    from flumen import turntable
     turntable.record_turntable(s, "/r", t["id"], rel, "marco")
     assert R.set_review_status(s, "/r", t["id"], rel, "approved", "marco") is True
     reloaded = tasks.get_task(s, "/r", t["id"])

@@ -1,4 +1,4 @@
-"""Tests for animpipe.playblast (pure helpers + dry-run; no real Blender/FTP)."""
+"""Tests for flumen.playblast (pure helpers + dry-run; no real Blender/FTP)."""
 
 import sys
 import types
@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import playblast, tasks
+from flumen import playblast, tasks
 
 
 def test_playblast_settings_defaults_and_override():

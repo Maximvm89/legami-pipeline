@@ -19,24 +19,41 @@ except ImportError:  # dotenv is optional; env vars still work without it.
     load_dotenv = None
 
 
-# Everything per-user lives under ~/.legami so artists sign in once (via the
+# Everything per-user lives under ~/.flumen so artists sign in once (via the
 # Workspace app) and never edit a file: the saved login (credentials.env) and the
 # show config downloaded from the server (cache/). Both the GUI and the toolkit
 # the Blender add-on shells out to read from here, so a publish/turntable from
 # Blender uses the same login and the same cached project config.
-LEGAMI_HOME = os.path.join(os.path.expanduser("~"), ".legami")
-USER_CRED_FILE = os.path.join(LEGAMI_HOME, "credentials.env")
-CACHE_DIR = os.path.join(LEGAMI_HOME, "cache")
+FLUMEN_HOME = os.path.join(os.path.expanduser("~"), ".flumen")
+_LEGACY_HOME = os.path.join(os.path.expanduser("~"), ".legami")   # pre-rename
+
+
+def _migrate_legacy_home() -> None:
+    """One-time ~/.legami -> ~/.flumen migration (the app was renamed), so nobody
+    signs in again or re-sets their local folder. Copy (not move) so an old
+    installed build keeps working during the transition. Never raises."""
+    try:
+        if os.path.isdir(_LEGACY_HOME) and not os.path.isdir(FLUMEN_HOME):
+            import shutil
+            shutil.copytree(_LEGACY_HOME, FLUMEN_HOME)
+    except Exception:  # noqa: BLE001 — worst case: the user signs in again
+        pass
+
+
+_migrate_legacy_home()
+
+USER_CRED_FILE = os.path.join(FLUMEN_HOME, "credentials.env")
+CACHE_DIR = os.path.join(FLUMEN_HOME, "cache")
 CACHED_CONFIG = os.path.join(CACHE_DIR, "config.yaml")
 # Per-user local project folder. Stored OUTSIDE the cache because cache/config.yaml
 # is re-downloaded from the server on every sign-in (which would wipe a local_root
 # written there). This file persists the artist's chosen folder across restarts.
-LOCAL_ROOT_FILE = os.path.join(LEGAMI_HOME, "local_root")
+LOCAL_ROOT_FILE = os.path.join(FLUMEN_HOME, "local_root")
 
 
 def save_local_root(value: str) -> str:
     """Persist the artist's local project folder per-user. Returns the path written."""
-    os.makedirs(LEGAMI_HOME, exist_ok=True)
+    os.makedirs(FLUMEN_HOME, exist_ok=True)
     with open(LOCAL_ROOT_FILE, "w", encoding="utf-8") as fh:
         fh.write((value or "").strip() + "\n")
     return LOCAL_ROOT_FILE
@@ -86,7 +103,7 @@ class SFTPCredentials:
             password=os.environ.get("SFTP_PASSWORD") or None,
             key_file=os.environ.get("SFTP_KEY_FILE") or None,
             key_passphrase=os.environ.get("SFTP_KEY_PASSPHRASE") or None,
-            remote_root=os.environ.get("LEGAMI_REMOTE_ROOT") or None,
+            remote_root=os.environ.get("FLUMEN_REMOTE_ROOT") or None,
         )
 
     def save_user(self) -> str:
@@ -98,7 +115,7 @@ class SFTPCredentials:
             f"SFTP_PORT={self.port}",
             f"SFTP_USER={self.user}",
             f"SFTP_PASSWORD={self.password or ''}",
-            f"LEGAMI_REMOTE_ROOT={self.remote_root or ''}",
+            f"FLUMEN_REMOTE_ROOT={self.remote_root or ''}",
         ]
         with open(USER_CRED_FILE, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
@@ -109,7 +126,7 @@ class SFTPCredentials:
         # Reflect immediately in this process so a subsequent from_env sees it.
         os.environ.update({"SFTP_HOST": self.host, "SFTP_PORT": str(self.port),
                            "SFTP_USER": self.user, "SFTP_PASSWORD": self.password or "",
-                           "LEGAMI_REMOTE_ROOT": self.remote_root or ""})
+                           "FLUMEN_REMOTE_ROOT": self.remote_root or ""})
         return USER_CRED_FILE
 
     @classmethod
@@ -136,16 +153,16 @@ class ProjectConfig:
 
     def resolved_local_root(self) -> str:
         """Local project folder. Precedence:
-          1. LEGAMI_PROJECT_ROOT env — the launcher exports the app's resolved
+          1. FLUMEN_PROJECT_ROOT env — the launcher exports the app's resolved
              folder so subprocesses (the turntable/playblast the Blender addon
              shells out to) read project_settings.json from the SAME place the app
              synced, instead of re-deriving a stale default.
           2. project.local_root from config.yaml — explicit dev/show override.
-          3. the per-user saved folder (~/.legami/local_root) — survives the
+          3. the per-user saved folder (~/.flumen/local_root) — survives the
              cache config.yaml being re-downloaded on each sign-in.
-          4. the default ~/Legami/<CODE>.
+          4. the default ~/Flumen/<CODE>.
         """
-        env_root = os.environ.get("LEGAMI_PROJECT_ROOT")
+        env_root = os.environ.get("FLUMEN_PROJECT_ROOT")
         if env_root:
             return os.path.expanduser(env_root)
         if self.local_root:
@@ -153,7 +170,7 @@ class ProjectConfig:
         saved = load_local_root()
         if saved:
             return os.path.expanduser(saved)
-        return os.path.join(os.path.expanduser("~"), "Legami", self.code)
+        return os.path.join(os.path.expanduser("~"), "Flumen", self.code)
 
     @classmethod
     def load(cls, config_path: str | os.PathLike) -> "ProjectConfig":

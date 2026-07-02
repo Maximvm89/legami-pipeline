@@ -1,4 +1,4 @@
-"""Tests for animpipe.cli commands that need server interaction (faked)."""
+"""Tests for flumen.cli commands that need server interaction (faked)."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import cli, tasks
+from flumen import cli, tasks
 from test_tasks import FakeSrv
 
 
@@ -178,7 +178,7 @@ def test_assembly_remove(monkeypatch, capsys):
 
 def test_resolve_assembly_downloads_and_prints_json(monkeypatch, capsys, tmp_path):
     import json
-    from animpipe import turntable, elements as E
+    from flumen import turntable, elements as E
     monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
     srv = _DownloadSrv()
     ent = "characters/frankenstein"
@@ -207,7 +207,7 @@ def test_resolve_assembly_downloads_and_prints_json(monkeypatch, capsys, tmp_pat
 
 
 def test_resolve_assembly_rejects_non_shot_task(monkeypatch, capsys, tmp_path):
-    from animpipe import turntable
+    from flumen import turntable
     monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
     srv = _DownloadSrv()
     at = tasks.save_task(srv, "/r",
@@ -220,7 +220,7 @@ def test_resolve_assembly_rejects_non_shot_task(monkeypatch, capsys, tmp_path):
 
 def test_resolve_assembly_list_does_not_download(monkeypatch, capsys, tmp_path):
     import json
-    from animpipe import turntable, elements as E
+    from flumen import turntable, elements as E
     monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
     srv = _DownloadSrv()
     ent = "characters/frankenstein"
@@ -248,7 +248,7 @@ def test_resolve_assembly_list_does_not_download(monkeypatch, capsys, tmp_path):
 
 def test_resolve_assembly_only_fetches_chosen(monkeypatch, capsys, tmp_path):
     import json
-    from animpipe import turntable, elements as E
+    from flumen import turntable, elements as E
     monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
     srv = _DownloadSrv()
     for nm in ("characters/frankenstein", "props/box"):
@@ -274,7 +274,7 @@ def test_resolve_assembly_only_fetches_chosen(monkeypatch, capsys, tmp_path):
 
 
 def test_assembly_set_range(monkeypatch, capsys):
-    from animpipe import elements as E
+    from flumen import elements as E
     srv = _DownloadSrv()
     _patch(monkeypatch, srv)
     rc = cli.cmd_assembly_set_range(_args(shot="SEQ010/SH0010", duration=240, start=0))
@@ -287,7 +287,7 @@ def test_assembly_set_range(monkeypatch, capsys):
 
 def test_resolve_assembly_includes_animation(monkeypatch, capsys, tmp_path):
     import json
-    from animpipe import turntable, elements as E
+    from flumen import turntable, elements as E
     monkeypatch.setattr(turntable, "_load_project_settings", lambda _r: {})
     srv = _DownloadSrv()
     ent = "characters/frankenstein"
@@ -328,7 +328,7 @@ def test_resolve_assembly_includes_animation(monkeypatch, capsys, tmp_path):
 
 def test_list_animations_downloads_and_prints(monkeypatch, capsys, tmp_path):
     import json
-    from animpipe import elements as E
+    from flumen import elements as E
     srv = _DownloadSrv()
     shot = "SEQ010/SH0010"
     lt = tasks.make_id("shot", shot, "layout")

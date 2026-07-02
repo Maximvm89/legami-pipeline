@@ -13,12 +13,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from animpipe import launcher
-from animpipe.config import ProjectConfig, SFTPCredentials
+from flumen import launcher
+from flumen.config import ProjectConfig, SFTPCredentials
 
 
 def _cfg():
-    return ProjectConfig(name="Legami", code="LEGAMI", remote_root="/shared/Legami",
+    return ProjectConfig(name="Flumen", code="LEGAMI", remote_root="/shared/Flumen",
                          schema={}, assets={}, shots={}, local_root="/tmp/legami")
 
 
