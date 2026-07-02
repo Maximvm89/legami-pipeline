@@ -40,6 +40,24 @@ def test_asset_has_work_and_publish():
     assert f"{ROOT}/03_assets/characters/hero/model/publish" in paths
 
 
+def test_asset_template_overlay_per_type():
+    # environments gain the dressing step from asset_templates; others don't.
+    env_tpl = S.asset_template_for(SCHEMA, "environments")
+    assert "dressing" in env_tpl and "model" in env_tpl     # additive overlay
+    assert "dressing" not in S.asset_template_for(SCHEMA, "characters")
+    # no asset_templates key at all -> shared template unchanged
+    assert S.asset_template_for({"asset_template": {"model": {}}}, "environments") \
+        == {"model": {}}
+
+
+def test_environment_asset_paths_include_dressing():
+    paths = S.asset_paths(SCHEMA, ROOT, "environments", "market_square")
+    assert f"{ROOT}/03_assets/environments/market_square/dressing/work" in paths
+    assert f"{ROOT}/03_assets/environments/market_square/dressing/publish" in paths
+    char = S.asset_paths(SCHEMA, ROOT, "characters", "hero")
+    assert not any("/dressing/" in p for p in char)
+
+
 def test_shot_has_departments():
     paths = S.shot_paths(SCHEMA, ROOT, "SEQ010", "SH0010")
     for dept in ("layout", "animation", "lighting", "comp"):

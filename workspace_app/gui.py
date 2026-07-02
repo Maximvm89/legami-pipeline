@@ -1755,19 +1755,41 @@ class NewAssetDialog(_NewEntityDialog):
     def __init__(self, schema: dict, naming: dict, parent=None):
         super().__init__("New Asset", parent)
         self.naming = naming or {}
+        self._schema = schema
         self.cb_category = QComboBox()
         self.cb_category.addItems(tasksmod.asset_categories(schema))
-        self.cb_category.currentTextChanged.connect(self._update_preview)
+        self.cb_category.currentTextChanged.connect(self._on_category_changed)
         self.ed_name = QLineEdit()
         self.ed_name.setPlaceholderText(tasksmod.NAMING_HINTS["asset_name"])
         self.ed_name.textChanged.connect(self._update_preview)
         self.form.addRow("Category", self.cb_category)
         self.form.addRow("Asset name", self.ed_name)
-        box, boxes = _steps_group(tasksmod.steps_for(schema, "asset"))
+        # Steps depend on the category (per-type template overlay: e.g. only
+        # environments have a dressing step) — rebuilt on category change.
+        box, boxes = _steps_group(self._category_steps())
         for cb in boxes:
             cb.toggled.connect(self._update_preview)
+        self._steps_box = box
         self._root.addWidget(box)
         self._finish(boxes)
+
+    def _category_steps(self) -> list[str]:
+        return tasksmod.steps_for(self._schema, "asset",
+                                  self.cb_category.currentText() or None)
+
+    def _on_category_changed(self):
+        # Rebuild the step checkboxes for the new category, keeping the checked
+        # state of steps that exist in both.
+        prior = {cb._step: cb.isChecked() for cb in self._step_boxes}
+        new_box, new_boxes = _steps_group(self._category_steps())
+        for cb in new_boxes:
+            if cb._step in prior:
+                cb.setChecked(prior[cb._step])
+            cb.toggled.connect(self._update_preview)
+        self._root.replaceWidget(self._steps_box, new_box)
+        self._steps_box.deleteLater()
+        self._steps_box, self._step_boxes = new_box, new_boxes
+        self._update_preview()
 
     def _entity(self) -> str:
         return f"{self.cb_category.currentText()}/{self.ed_name.text().strip()}"

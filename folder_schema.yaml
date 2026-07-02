@@ -65,6 +65,15 @@ asset_template:
     work: {}
     publish: {}
 
+# Per-asset-type ADDITIONS overlaid on asset_template (same shape). Only the
+# listed types get the extra steps — e.g. environments gain a set-dressing
+# step (place published props over the environment, publish named layouts).
+asset_templates:
+  environments:
+    dressing:              # set-dressing: prop placements over the environment
+      work: {}
+      publish: {}
+
 # ---------------------------------------------------------------------------
 # Per-shot department template.
 # Created at: 04_sequences/<seq>/<shot>/

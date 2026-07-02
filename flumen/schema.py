@@ -35,13 +35,23 @@ def project_paths(schema: dict[str, Any], remote_root: str) -> list[str]:
     return expand_tree(schema.get("root") or {}, remote_root)
 
 
+def asset_template_for(schema: dict[str, Any], asset_type: str) -> dict:
+    """The effective per-asset template for a type: the shared asset_template
+    overlaid with any per-type ADDITIONS from asset_templates (e.g. environments
+    gain a dressing step). Absent overlay = today's shared behavior."""
+    base = dict(schema.get("asset_template") or {})
+    overlay = (schema.get("asset_templates") or {}).get(asset_type) or {}
+    base.update(overlay)
+    return base
+
+
 def asset_paths(
     schema: dict[str, Any], remote_root: str, asset_type: str, name: str
 ) -> list[str]:
     """Folders for a single asset, including its parent folder."""
     base = posixpath.join(remote_root, "03_assets", asset_type, name)
     paths = [base]
-    paths += expand_tree(schema.get("asset_template") or {}, base)
+    paths += expand_tree(asset_template_for(schema, asset_type), base)
     return _dedupe_sorted(paths)
 
 

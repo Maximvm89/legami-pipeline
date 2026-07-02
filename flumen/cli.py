@@ -369,6 +369,45 @@ def cmd_list_looks(args) -> int:
     return 0
 
 
+def cmd_list_dressings(args) -> int:
+    """Print the named set-dressings an environment's dressing task has published,
+    as JSON. Feeds the shot-breakdown / Blender dropdowns."""
+    import json
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import tasks as T
+    with SFTPClient(creds) as client:
+        task = T.get_task(client, cfg.remote_root, args.task)
+        if not task:
+            print(f"error: task not found: {args.task}", file=sys.stderr)
+            return 1
+        dressings = T.published_dressings(task)
+    print(json.dumps(dressings))
+    return 0
+
+
+def cmd_list_asset_publishes(args) -> int:
+    """Print every asset that has a published .blend at a step (default: model),
+    as JSON [{entity, step, blend_rel}]. Feeds the Blender 'Add prop' dropdown."""
+    import json
+    cfg = ProjectConfig.load(args.config)
+    creds = SFTPCredentials.from_env(args.env)
+    from . import tasks as T
+    out = []
+    with SFTPClient(creds) as client:
+        for task in T.load_tasks(client, cfg.remote_root):
+            if task.get("type") != "asset" or task.get("step") != args.step:
+                continue
+            pubs = [p for p in T.published_files(task)
+                    if p["name"].endswith(".blend")]
+            if pubs:
+                out.append({"entity": task.get("entity", ""), "step": args.step,
+                            "blend_rel": pubs[0]["rel"]})
+    out.sort(key=lambda r: r["entity"])
+    print(json.dumps(out))
+    return 0
+
+
 def cmd_fetch_look(args) -> int:
     """Download a published look (its .blend + manifest + textures/) into the local
     mirror and print the local .blend path. Used by 'Apply look' so downstream can
@@ -928,6 +967,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="list a surface task's published looks (JSON)")
     ll.add_argument("--task", required=True, help="surface task id")
     ll.set_defaults(func=cmd_list_looks)
+
+    ld = sub.add_parser("list-dressings", parents=[common],
+                        help="list an environment's published set-dressings (JSON)")
+    ld.add_argument("--task", required=True, help="dressing task id")
+    ld.set_defaults(func=cmd_list_dressings)
+
+    lap = sub.add_parser("list-asset-publishes", parents=[common],
+                         help="list assets with a published .blend at a step (JSON)")
+    lap.add_argument("--step", default="model", help="step to look at (default: model)")
+    lap.set_defaults(func=cmd_list_asset_publishes)
 
     fl = sub.add_parser("fetch-look", parents=[common],
                         help="download a published look (.blend + manifest + textures)")

@@ -362,3 +362,54 @@ def test_list_animations_downloads_and_prints(monkeypatch, capsys, tmp_path):
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out[0]["hashes"] == {"camera": "h5"} and "blend_local" not in out[0]
     assert srv.downloads == []
+
+
+def test_list_dressings_json(monkeypatch, capsys):
+    import json
+    srv = _DownloadSrv()
+    dt = tasks.save_task(srv, "/r",
+                         tasks.new_task("asset", "environments/market_square",
+                                        "dressing"))
+    pub = "03_assets/environments/market_square/dressing/publish/"
+    dt["publishes"] = [
+        {"files": [pub + "market_square_dressing_night_market_v001.blend",
+                   pub + "market_square_dressing_night_market_v001.manifest.json"],
+         "time": 1, "by": "leo"},
+        {"files": [pub + "market_square_dressing_night_market_v002.blend"],
+         "time": 2, "by": "leo"},
+    ]
+    tasks.save_task(srv, "/r", dt)
+    _patch(monkeypatch, srv)
+    rc = cli.cmd_list_dressings(_args(task=dt["id"]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip())
+    assert [(d["dressing"], d["version"]) for d in out] == [("night_market", 2)]
+    assert cli.cmd_list_dressings(_args(task="nope")) == 1     # missing task
+
+
+def test_list_asset_publishes_json(monkeypatch, capsys):
+    import json
+    srv = _DownloadSrv()
+    # published model -> listed
+    mt = tasks.save_task(srv, "/r",
+                         tasks.new_task("asset", "props/lantern", "model"))
+    mt["publishes"] = [{"files": [
+        "03_assets/props/lantern/model/publish/lantern_model_v002.blend"],
+        "time": 1}]
+    tasks.save_task(srv, "/r", mt)
+    # model task with no publishes -> skipped
+    tasks.save_task(srv, "/r", tasks.new_task("asset", "props/crate", "model"))
+    # surface task -> skipped (wrong step)
+    st = tasks.save_task(srv, "/r",
+                         tasks.new_task("asset", "props/lantern", "surface"))
+    st["publishes"] = [{"files": [
+        "03_assets/props/lantern/surface/publish/lantern_surface_default_v001.blend"],
+        "time": 1}]
+    tasks.save_task(srv, "/r", st)
+    _patch(monkeypatch, srv)
+    rc = cli.cmd_list_asset_publishes(_args(step="model"))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out == [{"entity": "props/lantern", "step": "model",
+                    "blend_rel": "03_assets/props/lantern/model/publish/"
+                                 "lantern_model_v002.blend"}]

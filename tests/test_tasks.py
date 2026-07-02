@@ -348,3 +348,36 @@ def test_publish_task_textures_go_under_textures_subdir():
     reloaded = tasks.get_task(s, "/r", t["id"])
     assert tasks.published_versions(reloaded) == {1}
     assert reloaded["publishes"][0]["files"] == rels
+
+
+def test_steps_for_category_overlay():
+    schema = {"asset_template": {"model": {"work": {}}, "rig": {"work": {}}},
+              "asset_templates": {"environments": {"dressing": {"work": {}}}},
+              "shot_template": {"layout": {"work": {}}}}
+    assert tasks.steps_for(schema, "asset") == ["model", "rig"]           # no category
+    assert tasks.steps_for(schema, "asset", "characters") == ["model", "rig"]
+    assert tasks.steps_for(schema, "asset", "environments") == \
+        ["model", "rig", "dressing"]
+    assert tasks.steps_for(schema, "shot") == ["layout"]                  # unaffected
+
+
+def test_published_dressings_latest_per_name():
+    t = tasks.new_task("asset", "environments/market_square", "dressing")
+    base = "03_assets/environments/market_square/dressing/publish/"
+    t["publishes"] = [
+        {"files": [base + "market_square_dressing_night_market_v001.blend",
+                   base + "market_square_dressing_night_market_v001.manifest.json"],
+         "time": 1, "by": "leo"},
+        {"files": [base + "market_square_dressing_night_market_v002.blend"],
+         "time": 2, "by": "leo", "description": "more lanterns"},
+        {"files": [base + "market_square_dressing_day_v001.blend"],
+         "time": 3, "by": "marco"},
+        {"files": [base + "market_square_model_v001.blend"], "time": 4},  # not a dressing
+    ]
+    out = tasks.published_dressings(t)
+    assert [(d["dressing"], d["version"]) for d in out] == \
+        [("day", 1), ("night_market", 2)]                     # latest per name, sorted
+    nm = out[1]
+    assert nm["blend_rel"].endswith("_v002.blend")
+    assert nm["manifest_rel"].endswith("_v002.manifest.json")
+    assert nm["description"] == "more lanterns"

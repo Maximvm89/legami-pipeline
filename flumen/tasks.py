@@ -45,10 +45,16 @@ def asset_categories(schema: dict) -> list[str]:
     return list((schema.get("root", {}).get("03_assets") or {}).keys())
 
 
-def steps_for(schema: dict, ttype: str) -> list[str]:
-    """Department steps from the schema for a task type (those with a work/ folder)."""
-    key = "asset_template" if ttype == "asset" else "shot_template"
-    tpl = schema.get(key) or {}
+def steps_for(schema: dict, ttype: str, asset_category: str | None = None) -> list[str]:
+    """Department steps from the schema for a task type (those with a work/ folder).
+    For assets, `asset_category` applies the per-type template overlay (e.g. only
+    environments have a dressing step); None keeps the shared template."""
+    if ttype == "asset":
+        from . import schema as schema_mod
+        tpl = (schema_mod.asset_template_for(schema, asset_category)
+               if asset_category else schema.get("asset_template") or {})
+    else:
+        tpl = schema.get("shot_template") or {}
     return [k for k, v in tpl.items() if isinstance(v, dict) and "work" in v]
 
 
@@ -132,6 +138,32 @@ def published_looks(task: dict) -> list[dict]:
             if cur is None or ver > cur["version"]:
                 best[look] = {
                     "look": look, "version": ver, "blend_rel": rel,
+                    "manifest_rel": rel[:-len(".blend")] + ".manifest.json",
+                    "time": rec.get("time"), "by": rec.get("by"),
+                    "description": rec.get("description", ""),
+                }
+    return [best[k] for k in sorted(best)]
+
+
+def published_dressings(task: dict) -> list[dict]:
+    """Named set-dressings an environment's dressing task has published, latest
+    version of each. A dressing file is '<asset>_dressing_<name>_vNNN.blend' with a
+    sibling instance manifest. Returns [{dressing, version, blend_rel, manifest_rel,
+    time, by, description}] sorted by name. Feeds the shot-breakdown dropdown."""
+    import os as _os
+    asset = (task.get("entity") or "").split("/")[-1]
+    pat = re.compile(re.escape(asset) + r"_dressing_(.+)_v(\d+)\.blend$")
+    best: dict[str, dict] = {}
+    for rec in task.get("publishes") or []:
+        for rel in rec.get("files") or []:
+            m = pat.search(_os.path.basename(rel))
+            if not m:
+                continue
+            name, ver = m.group(1), int(m.group(2))
+            cur = best.get(name)
+            if cur is None or ver > cur["version"]:
+                best[name] = {
+                    "dressing": name, "version": ver, "blend_rel": rel,
                     "manifest_rel": rel[:-len(".blend")] + ".manifest.json",
                     "time": rec.get("time"), "by": rec.get("by"),
                     "description": rec.get("description", ""),
